@@ -1,0 +1,29 @@
+# Render Blueprint: New → Blueprint, pick this repo, and Render creates the web service.
+services:
+  - type: web
+    name: teecas-admin
+    runtime: node
+    plan: starter # stays awake; "free" sleeps when idle and can miss the start of a rush
+    region: frankfurt
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    domains:
+      - admin.teecas.online
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: MONGODB_URI
+        sync: false # paste your MongoDB Atlas connection string when Render asks
+      - key: MONGODB_DB
+        value: teecas
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SEED_OWNER_PASSWORD
+        sync: false # the owner's first password; change it after signing in
+      - key: SEED_DEMO
+        value: "true"
+      - key: SHOW_DEMO_LOGINS
+        value: "false"
+      - key: RESTAURANT_TIMEZONE
+        value: Africa/Lagos

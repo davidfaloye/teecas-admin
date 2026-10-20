@@ -20,13 +20,12 @@ The back office for Teecas Amala Express Bukka's three branches, and the API the
 ## Run it locally
 
 ```bash
-cd admin
 npm install
 npm run build      # builds the dashboard into web/dist
 npm start          # http://localhost:4000
 ```
 
-With no `MONGODB_URI`, data is kept in `admin/data/dev-db.json`. The first start loads demo data: three branches (Ogba Road, Uniben, Ring Road), the menu from teecas.online, dummy stock for each branch, and five weeks of sample orders.
+With no `MONGODB_URI`, data is kept in `data/dev-db.json`. The first start loads demo data: three branches (Ogba Road, Uniben, Ring Road), the menu from teecas.online, dummy stock for each branch, and five weeks of sample orders.
 
 Demo sign-ins (password `teecas-demo`):
 
@@ -38,17 +37,16 @@ Demo sign-ins (password `teecas-demo`):
 
 ## Deploy on Render
 
-1. Create a free MongoDB Atlas cluster and copy its connection string.
-2. In Render, create a **Web Service** from this repo with:
-   - Root directory: `admin`
-   - Build command: `npm install && npm run build`
-   - Start command: `npm start`
-3. Set environment variables: `MONGODB_URI`, a long random `JWT_SECRET`, and `SEED_OWNER_PASSWORD` (the owner's first password). See `.env.example` for the rest.
-4. After the first deploy, sign in as the owner, change the password (My account), then edit the branches: real names, addresses and each branch's WhatsApp number. Replace the dummy stock with real counts.
+1. Create a free MongoDB Atlas cluster. Under Network Access, allow `0.0.0.0/0` (Render's addresses change), and copy the connection string.
+2. In Render, choose **New → Blueprint** and pick this repo. `render.yaml` sets up the web service; Render asks for `MONGODB_URI` and `SEED_OWNER_PASSWORD` and generates `JWT_SECRET`.
+   (Or **New → Web Service** by hand: build `npm install && npm run build`, start `npm start`, and the same environment variables.)
+3. Add the custom domain `admin.teecas.online` (in the Blueprint already). In Namecheap, add a CNAME record: host `admin`, value the service's `….onrender.com` address. Render issues the HTTPS certificate.
+4. After the first deploy, sign in as the owner (`owner@teecas.online` and the `SEED_OWNER_PASSWORD` you set), change the password (My account), then edit the branches: real names, addresses and each branch's WhatsApp number. Replace the dummy stock with real counts.
+5. Point the ordering app at it: `EXPO_PUBLIC_API_URL=https://admin.teecas.online`.
 
 For the client showcase, leave `SEED_DEMO` on so the dashboard opens with sample data. Before going live, run `npm run seed -- --reset --no-orders` against the production database (or set `SEED_DEMO=false` on a fresh one) so the sample orders don't mix with real ones.
 
-The free Render plan sleeps after inactivity, so the first request after a quiet spell takes a few seconds. A paid instance stays awake, which matters for a live order board.
+`render.yaml` uses the Starter plan. The free plan sleeps after inactivity, so the first request after a quiet spell takes a while and the live board can miss new orders.
 
 ## How orders reach the restaurant
 
