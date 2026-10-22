@@ -38,42 +38,52 @@ export default function Login({ onSignedIn }) {
 
   return (
     <div className="login">
-      <form className="card" onSubmit={submit} noValidate>
-        <div className="brand">
-          Teecas <span>Admin</span>
-          <small>Amala Express Bukka</small>
-        </div>
-        <p className="dim" style={{ textAlign: 'center' }}>
-          Orders, menu, stock and sales for every branch.
-        </p>
-        <Field label="Email">
-          <input className="input" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
-        </Field>
-        <Field label="Password">
-          <input className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </Field>
-        {error && <div className="error-box">{error}</div>}
-        <button className="btn primary lg" disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-        {demo && (
-        <div className="demo-logins">
-          <span>Demo accounts (password teecas-demo):</span>
-          {DEMO.map(([e, label]) => (
-            <button
-              type="button"
-              key={e}
-              onClick={() => {
-                setEmail(e);
-                setPassword('teecas-demo');
-              }}
-            >
-              {e} · {label}
-            </button>
-          ))}
-        </div>
-        )}
-      </form>
+      <aside className="login-art" aria-hidden="true">
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+          <i key={n} className={`t t${n}`} />
+        ))}
+        <b>Teecas Amala Express Bukka</b>
+      </aside>
+      <main className="login-panel">
+        <form onSubmit={submit} noValidate>
+          <div className="brand">
+            Teecas <span>Admin</span>
+          </div>
+          <div>
+            <h1>Sign in</h1>
+            <p className="dim" style={{ marginTop: 8 }}>
+              Orders, menu, stock and sales for every branch.
+            </p>
+          </div>
+          <Field label="Email">
+            <input className="input" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+          </Field>
+          <Field label="Password">
+            <input className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </Field>
+          {error && <div className="error-box">{error}</div>}
+          <button className="btn primary lg" disabled={busy}>
+            {busy ? 'Signing in…' : 'Sign in'}
+          </button>
+          {demo && (
+            <div className="demo-logins">
+              <span>Demo accounts (password teecas-demo)</span>
+              {DEMO.map(([e, label]) => (
+                <button
+                  type="button"
+                  key={e}
+                  onClick={() => {
+                    setEmail(e);
+                    setPassword('teecas-demo');
+                  }}
+                >
+                  {e} · {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </form>
+      </main>
     </div>
   );
 }
