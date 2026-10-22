@@ -111,7 +111,14 @@ export function ErrorBox({ error, onRetry }) {
   );
 }
 
-export const Loading = () => <div className="empty">Loading…</div>;
+export const Spinner = ({ label }) => <span className="spinner" role="status" aria-label={label || 'Loading'} />;
+
+export const Loading = ({ label = 'Loading…' }) => (
+  <div className="empty loading-box">
+    <Spinner label={label} />
+    <span>{label}</span>
+  </div>
+);
 
 const PATHS = {
   home: 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z',

@@ -207,6 +207,14 @@ table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
 .chip { display: inline-block; font-size: 12px; font-weight: 700; color: var(--ink); background: #fff; border: 1.5px solid var(--ink); padding: 1px 8px; }
 
 .empty { padding: 36px 16px; text-align: center; color: var(--muted); }
+.spinner { display: inline-block; flex: none; width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--line-2); border-top-color: var(--accent); border-right-color: var(--accent); animation: spin .7s linear infinite; vertical-align: middle; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-box { display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 600; color: var(--text-2); }
+.loading-box .spinner { width: 22px; height: 22px; }
+.loading-inline { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--ink); background: var(--warn-soft); border: 1.5px solid var(--ink); padding: 6px 10px; }
+.is-loading { position: relative; }
+.is-loading table, .is-loading .pager { opacity: 0.35; pointer-events: none; transition: opacity .15s; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-top: 2px solid var(--ink); }
 .error-box { padding: 10px 12px; background: var(--bad-soft); border-left: 5px solid var(--accent); color: var(--bad); font-size: 14px; font-weight: 600; }
 .notice { padding: 10px 12px; background: var(--warn-soft); border-left: 5px solid var(--gold); color: var(--ink); font-size: 14px; font-weight: 600; }
 
@@ -348,6 +356,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
+  .spinner { animation: spin 1.6s linear infinite !important; } /* the loading icon still turns, slowly */
 }
 
 @media (max-width: 600px) {

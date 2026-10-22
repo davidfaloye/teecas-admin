@@ -11,6 +11,7 @@ import Analytics from './pages/Analytics.jsx';
 import Branches from './pages/Branches.jsx';
 import Team from './pages/Team.jsx';
 import Account from './pages/Account.jsx';
+import { playAlarm } from './alarm.js';
 
 const PAGES = [
   { id: 'home', label: 'Today', icon: 'home', roles: ['owner', 'manager', 'cashier'], C: Home },
@@ -25,26 +26,6 @@ const PAGES = [
 
 const SCOPE_KEY = 'teecas_admin_branch';
 const readHash = () => (window.location.hash.replace(/^#\/?/, '').split('?')[0] || '');
-
-function beep() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    [0, 0.18].forEach((t, i) => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.frequency.value = i ? 1046 : 784;
-      g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
-      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.16);
-      o.connect(g).connect(ctx.destination);
-      o.start(ctx.currentTime + t);
-      o.stop(ctx.currentTime + t + 0.18);
-    });
-    setTimeout(() => ctx.close(), 600);
-  } catch {
-    /* audio unavailable */
-  }
-}
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -139,7 +120,7 @@ export default function App() {
       window.dispatchEvent(new CustomEvent(`teecas:${type}`, { detail: order }));
       refreshNewCount();
       if (type === 'order.created') {
-        if (soundRef.current) beep();
+        if (soundRef.current) playAlarm();
         notify(`New order #${order.number} · ${order.branchName} · ${order.customer.name}`, 'new', () => {
           window.location.hash = '#/orders';
         });
@@ -222,7 +203,16 @@ export default function App() {
                 <i />
                 <span>{live ? 'Live' : 'Offline'}</span>
               </span>
-              <button className="btn sm ghost" onClick={() => setSound((s) => !s)} aria-pressed={sound} title="Sound on new orders">
+              <button
+                className="btn sm ghost"
+                onClick={() => {
+                  // Turning the sound on plays the alarm once so staff know what to listen for.
+                  if (!sound) playAlarm();
+                  setSound((v) => !v);
+                }}
+                aria-pressed={sound}
+                title={sound ? 'Alarm on for new orders. Click to mute.' : 'Muted. Click to turn the new-order alarm on (plays it once).'}
+              >
                 <Icon name="bell" />
                 {sound ? 'Sound on' : 'Muted'}
               </button>

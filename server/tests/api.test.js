@@ -193,3 +193,15 @@ test('app orders without a branch: every branch sees them, the one that accepts 
   const picked = await call('PATCH', `/api/orders/${second.data.order.id}/status`, { token: owner, body: { status: 'accepted', branchId: ring.id } });
   assert.equal(picked.data.order.branchId, ring.id);
 });
+
+test('order history pages: skip and total', async () => {
+  const owner = await login('owner@teecas.online');
+  const all = await call('GET', '/api/orders?limit=500&total=1', { token: owner });
+  const total = all.data.total;
+  assert.ok(total >= 3);
+  const p1 = await call('GET', '/api/orders?limit=2&skip=0&total=1', { token: owner });
+  const p2 = await call('GET', '/api/orders?limit=2&skip=2&total=1', { token: owner });
+  assert.equal(p1.data.total, total);
+  assert.equal(p1.data.orders.length, 2);
+  assert.deepEqual([...p1.data.orders, ...p2.data.orders].map((o) => o._id), all.data.orders.slice(0, 2 + p2.data.orders.length).map((o) => o._id));
+});

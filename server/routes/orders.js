@@ -7,7 +7,8 @@ import { ORDER_STATUSES, PAYMENT_METHODS, bad, forbidden, str, startOfLocalDay, 
 
 const r = Router();
 
-// GET /api/orders?status=placed,accepted&branchId=&from=YYYY-MM-DD&to=YYYY-MM-DD&q=&limit=
+// GET /api/orders?status=placed,accepted&branchId=&from=YYYY-MM-DD&to=YYYY-MM-DD&q=&limit=&skip=
+// With &total=1 the response also says how many orders match, for paging.
 r.get('/', async (req, res) => {
   const filter = { ...orderBranchFilter(req) };
   if (req.query.status) {
@@ -29,8 +30,12 @@ r.get('/', async (req, res) => {
     if (Number.isInteger(n)) filter.$or.push({ number: n });
   }
   const limit = Math.min(Number(req.query.limit) || 100, 500);
-  const orders = await col('orders').find(filter, { sort: { createdAt: -1 }, limit });
-  res.json({ orders });
+  const skip = Math.max(0, Math.floor(Number(req.query.skip) || 0));
+  const [orders, total] = await Promise.all([
+    col('orders').find(filter, { sort: { createdAt: -1 }, limit, skip }),
+    req.query.total ? col('orders').count(filter) : null,
+  ]);
+  res.json(total === null ? { orders } : { orders, total, skip, limit });
 });
 
 r.get('/:id', async (req, res) => {

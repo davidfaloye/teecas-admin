@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { useApp, useLoad, useOrderEvents, ErrorBox, Loading, StatusBadge, Modal, Icon, Field } from '../ui.jsx';
+import { useApp, useLoad, useOrderEvents, ErrorBox, Loading, Spinner, StatusBadge, Modal, Icon, Field } from '../ui.jsx';
 import { naira, time, ago, dateTime, nextAction, STATUS_LABEL, PAY_METHODS, todayKey, addDays } from '../format.js';
 
 // The four columns of the live board. "preparing" and "ready" (used by the kitchen view and by
@@ -318,29 +318,45 @@ function DoneTicket({ order: o, showBranch, onOpen }) {
   );
 }
 
+const PAGE_SIZE = 25;
+const RANGES = [
+  ['today', 'Today'],
+  ['7', 'Last 7 days'],
+  ['30', 'Last 30 days'],
+];
+
 function History({ branchQ, onOpen }) {
   const [range, setRange] = useState('today');
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const today = todayKey();
   const from = range === 'today' ? today : range === '7' ? addDays(today, -6) : addDays(today, -29);
+  // The page belongs to the current filter, so a new range, search or branch starts at page 1.
+  const filterKey = `${branchQ}|${from}|${query}`;
+  const [paging, setPaging] = useState({ key: filterKey, page: 0 });
+  const page = paging.key === filterKey ? paging.page : 0;
+  const setPage = (fn) => setPaging({ key: filterKey, page: fn(page) });
   const { data, error, loading, reload } = useLoad(
-    () => api('/orders', { query: { branchId: branchQ, from: query ? undefined : from, to: query ? undefined : today, q: query, limit: 300 } }),
-    [branchQ, from, query],
+    () =>
+      api('/orders', {
+        query: { branchId: branchQ, from: query ? undefined : from, to: query ? undefined : today, q: query, limit: PAGE_SIZE, skip: page * PAGE_SIZE, total: 1 },
+      }),
+    [branchQ, from, query, page],
   );
   useOrderEvents(() => reload(true));
   const showBranch = !branchQ;
+
+  const total = data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const what = query ? `results for "${query}"` : RANGES.find(([id]) => id === range)[1].toLowerCase();
+  const switching = loading && data; // keep the old rows on screen, dimmed, until the new ones arrive
 
   return (
     <div className="stack">
       <div className="row wrap">
         <div className="seg">
-          {[
-            ['today', 'Today'],
-            ['7', 'Last 7 days'],
-            ['30', 'Last 30 days'],
-          ].map(([id, l]) => (
-            <button key={id} className={range === id && !query ? 'on' : ''} onClick={() => { setRange(id); setQ(''); setQuery(''); }}>
+          {RANGES.map(([id, l]) => (
+            <button key={id} className={range === id && !query ? 'on' : ''} disabled={loading && range === id && !query} onClick={() => { setRange(id); setQ(''); setQuery(''); }}>
               {l}
             </button>
           ))}
@@ -351,15 +367,21 @@ function History({ branchQ, onOpen }) {
             <Icon name="search" />
           </button>
         </form>
+        {switching && (
+          <span className="loading-inline" aria-live="polite">
+            <Spinner /> Loading {what}…
+          </span>
+        )}
       </div>
       <ErrorBox error={error} onRetry={reload} />
       {loading && !data ? (
-        <Loading />
+        <Loading label="Loading orders…" />
       ) : (
-        <div className="card flush table-wrap">
+        <div className={`card flush ${switching ? 'is-loading' : ''}`} aria-busy={Boolean(switching)}>
           {data.orders.length === 0 ? (
             <div className="empty">No orders match.</div>
           ) : (
+            <div className="table-wrap">
             <table className="t">
               <thead>
                 <tr>
@@ -390,6 +412,25 @@ function History({ branchQ, onOpen }) {
                 ))}
               </tbody>
             </table>
+            </div>
+          )}
+          {total > 0 && (
+            <div className="pager">
+              <span className="small dim num">
+                {page * PAGE_SIZE + 1}–{Math.min(total, (page + 1) * PAGE_SIZE)} of {total} orders
+              </span>
+              <div className="row" style={{ gap: 6 }}>
+                <button className="btn sm" disabled={page === 0 || loading} onClick={() => setPage((p) => p - 1)}>
+                  Previous
+                </button>
+                <span className="small num" style={{ minWidth: 86, textAlign: 'center' }}>
+                  Page {page + 1} of {pages}
+                </span>
+                <button className="btn sm" disabled={page >= pages - 1 || loading} onClick={() => setPage((p) => p + 1)}>
+                  Next
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}
