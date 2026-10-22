@@ -134,6 +134,7 @@ export default function App() {
     };
     es.addEventListener('order.created', fwd('order.created'));
     es.addEventListener('order.updated', fwd('order.updated'));
+    es.addEventListener('order.deleted', fwd('order.deleted'));
     return () => {
       es.close();
       setLive(false);

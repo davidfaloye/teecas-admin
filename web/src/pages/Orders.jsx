@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useApp, useLoad, useOrderEvents, ErrorBox, Loading, Spinner, StatusBadge, Modal, Icon, Field } from '../ui.jsx';
 import { naira, time, ago, dateTime, nextAction, STATUS_LABEL, PAY_METHODS, todayKey, addDays } from '../format.js';
@@ -116,6 +116,10 @@ function Board({ branchQ, onOpen }) {
     });
 
   useOrderEvents((type, order) => {
+    if (type === 'order.deleted') {
+      setData((d) => (d ? { orders: d.orders.filter((o) => o._id !== order._id) } : d));
+      return;
+    }
     // Unassigned orders show on every board; once a branch takes one, other boards drop it.
     if (order.branchId && branchQ && order.branchId !== branchQ) {
       setData((d) => (d ? { orders: d.orders.filter((o) => o._id !== order._id) } : d));
@@ -444,7 +448,31 @@ function OrderDetail({ id, onClose }) {
   const [cancelling, setCancelling] = useState(false);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
-  useOrderEvents((type, o) => o._id === id && setData({ order: o }));
+  useOrderEvents((type, o) => {
+    if (o._id !== id) return;
+    if (type === 'order.deleted') {
+      // Someone else deleted it while this was open.
+      if (!deletedHere.current) notify(`Order #${o.number} was deleted.`);
+      onClose();
+      return;
+    }
+    setData({ order: o });
+  });
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const deletedHere = useRef(false);
+  async function remove() {
+    setBusy(true);
+    try {
+      const d = await api(`/orders/${id}`, { method: 'DELETE' });
+      deletedHere.current = true;
+      notify(`Order #${d.number} deleted.`);
+      setConfirmDelete(false);
+      onClose();
+    } catch (e) {
+      notify(e.message, 'err');
+      setBusy(false);
+    }
+  }
 
   const o = data?.order;
   async function run(fn) {
@@ -478,6 +506,11 @@ function OrderDetail({ id, onClose }) {
       footer={
         o && (
           <>
+            {user.role === 'owner' && (
+              <button className="btn ghost danger" style={{ marginRight: 'auto' }} disabled={busy} onClick={() => setConfirmDelete(true)}>
+                <Icon name="trash" /> Delete
+              </button>
+            )}
             {canCancel && !cancelling && (
               <button className="btn danger" onClick={() => setCancelling(true)}>
                 Cancel order
@@ -631,6 +664,32 @@ function OrderDetail({ id, onClose }) {
             </div>
           </div>
         </>
+      )}
+      {confirmDelete && o && (
+        <Modal
+          small
+          title={`Delete order #${o.number}?`}
+          onClose={() => !busy && setConfirmDelete(false)}
+          footer={
+            <>
+              <button className="btn ghost" disabled={busy} onClick={() => setConfirmDelete(false)} autoFocus>
+                Keep it
+              </button>
+              <button className="btn danger-fill" disabled={busy} onClick={remove}>
+                {busy ? <Spinner label="Deleting" /> : <Icon name="trash" />} Delete for good
+              </button>
+            </>
+          }
+        >
+          <p style={{ margin: 0 }}>
+            {o.customer?.name || 'This customer'}’s order for {naira(o.total)} will be removed from the board, history and sales figures. <b>This can’t be undone.</b>
+          </p>
+          {!['completed', 'cancelled'].includes(o.status) && (
+            <p className="muted small" style={{ margin: '10px 0 0' }}>
+              This order is still open. If it just isn’t going ahead, cancel it instead so the customer sees why.
+            </p>
+          )}
+        </Modal>
       )}
     </Modal>
   );

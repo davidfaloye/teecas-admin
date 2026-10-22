@@ -77,4 +77,16 @@ r.patch('/:id/payment', requireRole('owner', 'manager', 'cashier'), async (req, 
   res.json({ order: updated });
 });
 
+// Delete an order for good (test orders, duplicates, pranks). Owner only. It disappears from the
+// board, history and sales figures; a customer tracking it in the app sees that it is no longer
+// available. Cancelling is the normal way to stop a real order; this is for removing it.
+r.delete('/:id', requireRole('owner'), async (req, res) => {
+  const order = await getOrderOr404(req.params.id);
+  const deleted = await col('orders').deleteOne({ _id: order._id });
+  if (!deleted) throw bad('That order was already deleted. Refresh the page.', 'CONFLICT');
+  console.log(`[orders] #${order.number} deleted by ${req.user.name}`);
+  publish('order.deleted', { _id: order._id, number: order.number, branchId: order.branchId }, order.branchId);
+  res.json({ ok: true, id: order._id, number: order.number });
+});
+
 export default r;

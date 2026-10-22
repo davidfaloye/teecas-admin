@@ -227,3 +227,33 @@ test('order notifications: the app can attach and remove a push token', async ()
   await call('PUT', `/api/public/orders/${data.order.id}/push?token=${t}`, { body: { pushToken: 'http://evil' } });
   assert.equal((await col('orders').findOne({ _id: data.order.id })).pushToken, null);
 });
+
+test('only the owner can delete an order, and it is gone everywhere', async () => {
+  // Created directly: the public endpoint allows 8 orders a minute and earlier tests used them.
+  const { createOrder } = await import('../orders.js');
+  const { data: m } = await call('GET', '/api/public/menu');
+  const amala = m.items.find((i) => i.name === 'Amala');
+  const { order } = await createOrder({
+    customer: { name: 'Delete Me', phone: '08031234567', address: '1 Test Street, Benin City' },
+    items: [{ id: amala.id, qty: 1 }],
+  });
+  const id = order._id;
+  const t = order.trackingToken;
+  const data = { order: { number: order.number } };
+
+  // Tokens signed directly: sign-in allows 10 tries a minute and earlier tests used them.
+  const { signToken } = await import('../auth.js');
+  const { col } = await import('../db.js');
+  const tokenFor = async (email) => signToken(await col('users').findOne({ email }));
+  for (const email of ['ogba@teecas.online', 'cashier.ogba@teecas.online', 'kitchen.ogba@teecas.online']) {
+    assert.equal((await call('DELETE', `/api/orders/${id}`, { token: await tokenFor(email) })).status, 403, email);
+  }
+
+  const owner = await tokenFor((await col('users').findOne({ role: 'owner' })).email);
+  const del = await call('DELETE', `/api/orders/${id}`, { token: owner });
+  assert.equal(del.status, 200);
+  assert.equal(del.data.number, data.order.number);
+  assert.equal((await call('GET', `/api/orders/${id}`, { token: owner })).status, 404);
+  assert.equal((await call('GET', `/api/public/orders/${id}?token=${t}`)).status, 404);
+  assert.equal((await call('DELETE', `/api/orders/${id}`, { token: owner })).status, 404);
+});

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { STATUS_LABEL, compactNaira } from './format.js';
 
 // ---------- app context ----------
@@ -39,29 +40,37 @@ export function useOrderEvents(fn) {
     const h = (e) => ref.current(e.type.replace('teecas:', ''), e.detail);
     window.addEventListener('teecas:order.created', h);
     window.addEventListener('teecas:order.updated', h);
+    window.addEventListener('teecas:order.deleted', h); // detail is only { _id, number, branchId }
     return () => {
       window.removeEventListener('teecas:order.created', h);
       window.removeEventListener('teecas:order.updated', h);
+      window.removeEventListener('teecas:order.deleted', h);
     };
   }, []);
 }
 
 // ---------- small components ----------
 
-export function Modal({ title, onClose, children, footer, wide }) {
+let openModals = 0;
+
+export function Modal({ title, onClose, children, footer, wide, small }) {
   useEffect(() => {
-    const k = (e) => e.key === 'Escape' && onClose();
+    const depth = ++openModals;
+    // With a confirm dialog open over another dialog, Escape closes only the top one.
+    const k = (e) => e.key === 'Escape' && depth === openModals && onClose();
     window.addEventListener('keydown', k);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       window.removeEventListener('keydown', k);
+      openModals--;
       document.body.style.overflow = prev;
     };
   }, [onClose]);
-  return (
+  // Rendered at the page root so a dialog opened from inside another dialog sits on top of it.
+  return createPortal(
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
+      <div className={`modal ${wide ? 'wide' : ''} ${small ? 'small' : ''}`} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
         <div className="modal-head">
           <h2>{title}</h2>
           <button className="btn ghost icon" onClick={onClose} aria-label="Close">
@@ -71,7 +80,8 @@ export function Modal({ title, onClose, children, footer, wide }) {
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -129,6 +139,7 @@ const PATHS = {
   branch: 'M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11zM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
   team: 'M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM21 19v-1a4 4 0 0 0-3-3.9M16 3.1a3.5 3.5 0 0 1 0 6.8',
   x: 'M6 6l12 12M18 6L6 18',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   plus: 'M12 5v14M5 12h14',
   bars: 'M4 7h16M4 12h16M4 17h16',
   out: 'M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l-4-4 4-4M6 12h10',
