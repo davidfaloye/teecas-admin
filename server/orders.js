@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { col, nextSequence } from './db.js';
 import { publish } from './events.js';
+import { cleanPushToken, notifyCustomer } from './push.js';
 import { orderMessage, waLink, notifyBranch } from './whatsapp.js';
 import { bad, notFound, forbidden, str, num, normalizePhone, NEXT_STATUS, PAYMENT_METHODS } from './lib.js';
 
@@ -94,6 +95,7 @@ export async function createOrder(input, { channel = 'app' } = {}) {
     status: 'placed',
     statusHistory: [{ status: 'placed', at: now, by: 'customer' }],
     trackingToken: crypto.randomBytes(12).toString('hex'),
+    pushToken: cleanPushToken(input.pushToken),
   });
 
   publish('order.created', order, branchId);
@@ -169,6 +171,7 @@ export async function changeStatus(order, nextStatus, user, reason = '', payment
   );
   if (!updated) throw bad('Someone else just updated this order. Refresh and try again.', 'CONFLICT');
   publish('order.updated', updated, updated.branchId);
+  notifyCustomer(updated); // fire and forget: tell the customer's phone
   if (!order.branchId && updated.branchId) publish('order.updated', updated, null); // let other branches drop it
   return updated;
 }

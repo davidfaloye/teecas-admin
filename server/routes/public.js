@@ -5,6 +5,7 @@ import cors from 'cors';
 import { col } from '../db.js';
 import { createOrder, isItemAvailable, isItemOnMenu, publicOrder, getOrderOr404, orderWhatsapp } from '../orders.js';
 import { rateLimit, notFound } from '../lib.js';
+import { cleanPushToken } from '../push.js';
 
 const r = Router();
 r.use(cors());
@@ -67,6 +68,7 @@ r.post('/orders', orderLimiter, async (req, res) => {
 });
 
 r.get('/orders/:id', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   const order = await getOrderOr404(req.params.id);
   if (!req.query.token || req.query.token !== order.trackingToken) throw notFound('Order not found.');
   const branch = order.branchId ? await col('branches').findOne({ _id: order.branchId }) : null;
@@ -75,6 +77,15 @@ r.get('/orders/:id', async (req, res) => {
     branch: branch ? publicBranch(branch) : null,
     whatsapp: await orderWhatsapp(order, branch),
   });
+});
+
+// The app turns order notifications on or off from its settings. pushToken null turns them off.
+r.put('/orders/:id/push', async (req, res) => {
+  const order = await getOrderOr404(req.params.id);
+  if (!req.query.token || req.query.token !== order.trackingToken) throw notFound('Order not found.');
+  await col('orders').updateOne({ _id: order._id }, { $set: { pushToken: cleanPushToken(req.body?.pushToken) } });
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true });
 });
 
 export default r;

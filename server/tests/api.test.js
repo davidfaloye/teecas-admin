@@ -205,3 +205,25 @@ test('order history pages: skip and total', async () => {
   assert.equal(p1.data.orders.length, 2);
   assert.deepEqual([...p1.data.orders, ...p2.data.orders].map((o) => o._id), all.data.orders.slice(0, 2 + p2.data.orders.length).map((o) => o._id));
 });
+
+test('order notifications: the app can attach and remove a push token', async () => {
+  const { col } = await import('../db.js');
+  const { data: m } = await call('GET', '/api/public/menu');
+  const amala = m.items.find((i) => i.name === 'Amala');
+  const token = 'ExponentPushToken[abcdefghij123456]';
+  const { data } = await call('POST', '/api/public/orders', {
+    body: {
+      customer: { name: 'Push Customer', phone: '08031234567', address: '1 Test Street, Benin City' },
+      items: [{ id: amala.id, qty: 1 }],
+      pushToken: token,
+    },
+  });
+  assert.equal((await col('orders').findOne({ _id: data.order.id })).pushToken, token);
+  const t = data.order.trackingToken;
+  assert.equal((await call('PUT', `/api/public/orders/${data.order.id}/push?token=nope`, { body: { pushToken: null } })).status, 404);
+  assert.equal((await call('PUT', `/api/public/orders/${data.order.id}/push?token=${t}`, { body: { pushToken: null } })).status, 200);
+  assert.equal((await col('orders').findOne({ _id: data.order.id })).pushToken, null);
+  // Junk is never stored.
+  await call('PUT', `/api/public/orders/${data.order.id}/push?token=${t}`, { body: { pushToken: 'http://evil' } });
+  assert.equal((await col('orders').findOne({ _id: data.order.id })).pushToken, null);
+});
