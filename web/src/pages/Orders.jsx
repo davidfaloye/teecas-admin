@@ -11,7 +11,7 @@ const COLUMNS = [
     title: 'Incoming order',
     statuses: ['placed'],
     color: 'var(--accent)',
-    help: 'New orders from the app, waiting for this branch. Check the items and the customer’s details, then tap Accept order. If you can’t fill it, open the order and cancel it with a reason; the customer sees the reason.',
+    help: 'New orders from the app. Customers don’t choose a branch, so every branch sees these. The branch nearest the customer that has the food takes it by accepting; it then leaves the other branches’ boards. If no branch can fill it, open the order and cancel it with a reason; the customer sees the reason.',
   },
   {
     id: 'accepted',
@@ -116,7 +116,11 @@ function Board({ branchQ, onOpen }) {
     });
 
   useOrderEvents((type, order) => {
-    if (branchQ && order.branchId !== branchQ) return;
+    // Unassigned orders show on every board; once a branch takes one, other boards drop it.
+    if (order.branchId && branchQ && order.branchId !== branchQ) {
+      setData((d) => (d ? { orders: d.orders.filter((o) => o._id !== order._id) } : d));
+      return;
+    }
     upsert(order);
     if (type === 'order.created') {
       setFresh((s) => new Set(s).add(order._id));
@@ -124,9 +128,9 @@ function Board({ branchQ, onOpen }) {
     }
   });
 
-  async function move(order, to, paymentMethod) {
+  async function move(order, to, paymentMethod, branchId) {
     try {
-      const d = await api(`/orders/${order._id}/status`, { method: 'PATCH', body: { status: to, paymentMethod } });
+      const d = await api(`/orders/${order._id}/status`, { method: 'PATCH', body: { status: to, paymentMethod, branchId } });
       upsert(d.order);
       return true;
     } catch (e) {
@@ -162,7 +166,7 @@ function Board({ branchQ, onOpen }) {
                 done ? (
                   <DoneTicket key={o._id} order={o} showBranch={showBranch} onOpen={() => onOpen(o._id)} />
                 ) : (
-                  <Ticket key={o._id} order={o} fresh={fresh.has(o._id)} showBranch={showBranch} onOpen={() => onOpen(o._id)} onMove={(to, pm) => move(o, to, pm)} canAct={canAct(user.role, o)} />
+                  <Ticket key={o._id} order={o} fresh={fresh.has(o._id)} showBranch={showBranch} onOpen={() => onOpen(o._id)} onMove={(to, pm, bid) => move(o, to, pm, bid)} defaultBranch={branchQ} canAct={canAct(user.role, o)} />
                 ),
               )}
             </div>
@@ -199,13 +203,53 @@ function PayPicker({ label, onPick, onCancel, busy }) {
   );
 }
 
-function Ticket({ order: o, fresh, showBranch, onOpen, onMove, canAct }) {
+// Who prepares an unassigned order is decided when it is accepted: the owner picks a branch,
+// branch staff accept it for their own branch.
+function AcceptButton({ order: o, busy, onAccept, defaultBranch, big }) {
+  const { user, branches } = useApp();
+  const [pick, setPick] = useState(defaultBranch || '');
+  const cls = `btn ${big ? '' : 'sm'} primary`;
+  if (o.branchId) {
+    return (
+      <button className={cls} disabled={busy} onClick={() => onAccept()}>
+        Accept order
+      </button>
+    );
+  }
+  if (user.role !== 'owner') {
+    const mine = branches.find((b) => b._id === user.branchId)?.name || 'my branch';
+    return (
+      <button className={cls} disabled={busy} onClick={() => onAccept(user.branchId)}>
+        Accept for {mine}
+      </button>
+    );
+  }
+  const open = branches.filter((b) => !b.archived);
+  return (
+    <div className="accept-pick" onClick={(e) => e.stopPropagation()}>
+      <select className="input" value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Branch that will prepare and deliver this order">
+        <option value="">Choose branch…</option>
+        {open.map((b) => (
+          <option key={b._id} value={b._id}>
+            {b.name}
+            {b.acceptingOrders ? '' : ' (paused)'}
+          </option>
+        ))}
+      </select>
+      <button className={cls} disabled={busy || !pick} onClick={() => onAccept(pick)}>
+        Accept
+      </button>
+    </div>
+  );
+}
+
+function Ticket({ order: o, fresh, showBranch, onOpen, onMove, canAct, defaultBranch }) {
   const a = nextAction(o);
   const [paying, setPaying] = useState(false);
   const [busy, setBusy] = useState(false);
-  const go = async (pm) => {
+  const go = async (pm, branchId) => {
     setBusy(true);
-    const ok = await onMove(a.to, pm);
+    const ok = await onMove(a.to, pm, branchId);
     setBusy(false);
     if (ok) setPaying(false);
   };
@@ -217,7 +261,7 @@ function Ticket({ order: o, fresh, showBranch, onOpen, onMove, canAct }) {
       </div>
       <div className="row wrap" style={{ gap: 6 }}>
         <span className="chip">{o.fulfilment === 'delivery' ? 'Delivery' : 'Pickup'}</span>
-        {showBranch && <span className="chip">{o.branchName}</span>}
+        {!o.branchId ? <span className="chip unassigned">No branch yet</span> : showBranch && <span className="chip">{o.branchName}</span>}
         {o.paymentStatus === 'paid' && <span className="badge paid">Paid</span>}
       </div>
       <div className="small">
@@ -238,6 +282,10 @@ function Ticket({ order: o, fresh, showBranch, onOpen, onMove, canAct }) {
       </div>
       {a && canAct && (paying ? (
         <PayPicker label={a.label} busy={busy} onPick={go} onCancel={() => setPaying(false)} />
+      ) : o.status === 'placed' ? (
+        <div className="acts" onClick={(e) => e.stopPropagation()}>
+          <AcceptButton order={o} busy={busy} defaultBranch={defaultBranch} onAccept={(bid) => go(undefined, bid)} />
+        </div>
       ) : (
         <div className="acts" onClick={(e) => e.stopPropagation()}>
           <button className={`btn sm ${o.status === 'placed' ? 'primary' : a.to === 'completed' ? 'good' : 'gold'}`} disabled={busy} onClick={() => (a.pay ? setPaying(true) : go())}>
@@ -330,7 +378,7 @@ function History({ branchQ, onOpen }) {
                   <tr key={o._id} className="click" onClick={() => onOpen(o._id)}>
                     <td className="num">#{o.number}</td>
                     <td className="small">{dateTime(o.createdAt)}</td>
-                    {showBranch && <td>{o.branchName}</td>}
+                    {showBranch && <td>{o.branchName || <span className="muted">No branch yet</span>}</td>}
                     <td>{o.customer.name}</td>
                     <td className="small">{o.fulfilment === 'delivery' ? 'Delivery' : 'Pickup'}</td>
                     <td>
@@ -373,7 +421,7 @@ function OrderDetail({ id, onClose }) {
     }
   }
   const [paying, setPaying] = useState(false);
-  const move = (to, why, paymentMethod) => run(() => api(`/orders/${id}/status`, { method: 'PATCH', body: { status: to, reason: why, paymentMethod } }));
+  const move = (to, why, paymentMethod, branchId) => run(() => api(`/orders/${id}/status`, { method: 'PATCH', body: { status: to, reason: why, paymentMethod, branchId } }));
   const pay = (method) => run(() => api(`/orders/${id}/payment`, { method: 'PATCH', body: { paymentStatus: 'paid', method } }));
   const unpay = () => run(() => api(`/orders/${id}/payment`, { method: 'PATCH', body: { paymentStatus: 'unpaid' } }));
 
@@ -394,7 +442,8 @@ function OrderDetail({ id, onClose }) {
                 Cancel order
               </button>
             )}
-            {a && canAct(user.role, o) && !paying && (
+            {a && canAct(user.role, o) && !paying && o.status === 'placed' && <AcceptButton order={o} busy={busy} big onAccept={(bid) => move(a.to, undefined, undefined, bid)} />}
+            {a && canAct(user.role, o) && !paying && o.status !== 'placed' && (
               <button className={`btn ${a.to === 'completed' ? 'good' : 'primary'}`} disabled={busy} onClick={() => (a.pay ? setPaying(true) : move(a.to))}>
                 {a.label}
               </button>
@@ -425,7 +474,7 @@ function OrderDetail({ id, onClose }) {
           <div className="row wrap">
             <StatusBadge status={o.status} />
             <span className="chip">{o.fulfilment === 'delivery' ? 'Delivery' : 'Pickup'}</span>
-            <span className="chip">{o.branchName}</span>
+            {o.branchId ? <span className="chip">{o.branchName}</span> : <span className="chip unassigned">No branch yet</span>}
             <span className="muted small">Placed {dateTime(o.createdAt)} in the app</span>
           </div>
 
@@ -457,7 +506,7 @@ function OrderDetail({ id, onClose }) {
                 <a className="btn sm" href={`tel:+${o.customer.phone}`}>
                   <Icon name="phone" /> Call
                 </a>
-                <a className="btn sm" href={`https://wa.me/${o.customer.phone}?text=${encodeURIComponent(`Hello ${o.customer.name.split(' ')[0]}, this is Teecas ${o.branchName} about your order #${o.number}.`)}`} target="_blank" rel="noreferrer">
+                <a className="btn sm" href={`https://wa.me/${o.customer.phone}?text=${encodeURIComponent(`Hello ${o.customer.name.split(' ')[0]}, this is Teecas${o.branchName ? ` ${o.branchName}` : ''} about your order #${o.number}.`)}`} target="_blank" rel="noreferrer">
                   <Icon name="wa" /> WhatsApp
                 </a>
               </div>
@@ -476,6 +525,13 @@ function OrderDetail({ id, onClose }) {
                     <span className="num">{naira(i.lineTotal)}</span>
                   </div>
                 ))}
+                {o.deliveryFeeExcluded && (
+                  <div className="l muted">
+                    <span>Delivery</span>
+                    <span className="leader" />
+                    <span>paid to the rider</span>
+                  </div>
+                )}
                 {o.deliveryFee > 0 && (
                   <div className="l muted">
                     <span>Delivery</span>

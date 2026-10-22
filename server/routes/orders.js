@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { col } from '../db.js';
-import { branchFilter, assertBranchAccess, requireRole } from '../auth.js';
+import { orderBranchFilter, assertOrderAccess, requireRole } from '../auth.js';
 import { changeStatus, getOrderOr404 } from '../orders.js';
 import { publish } from '../events.js';
 import { ORDER_STATUSES, PAYMENT_METHODS, bad, forbidden, str, startOfLocalDay, addDays } from '../lib.js';
@@ -9,7 +9,7 @@ const r = Router();
 
 // GET /api/orders?status=placed,accepted&branchId=&from=YYYY-MM-DD&to=YYYY-MM-DD&q=&limit=
 r.get('/', async (req, res) => {
-  const filter = { ...branchFilter(req) };
+  const filter = { ...orderBranchFilter(req) };
   if (req.query.status) {
     const statuses = String(req.query.status)
       .split(',')
@@ -35,25 +35,25 @@ r.get('/', async (req, res) => {
 
 r.get('/:id', async (req, res) => {
   const order = await getOrderOr404(req.params.id);
-  assertBranchAccess(req, order.branchId);
+  assertOrderAccess(req, order);
   res.json({ order });
 });
 
 r.patch('/:id/status', async (req, res) => {
   const order = await getOrderOr404(req.params.id);
-  assertBranchAccess(req, order.branchId);
+  assertOrderAccess(req, order);
   const status = String(req.body?.status || '');
   if (!ORDER_STATUSES.includes(status)) throw bad('Unknown status.');
   const reason = str(req.body?.reason, { field: 'Reason', max: 200 });
   if (status === 'completed' && req.user.role === 'kitchen') throw forbidden('Only managers and cashiers can record payment.');
-  const updated = await changeStatus(order, status, req.user, reason, req.body?.paymentMethod || null);
+  const updated = await changeStatus(order, status, req.user, reason, req.body?.paymentMethod || null, req.body?.branchId || null);
   res.json({ order: updated });
 });
 
 // Record payment collected on delivery or at pickup.
 r.patch('/:id/payment', requireRole('owner', 'manager', 'cashier'), async (req, res) => {
   const order = await getOrderOr404(req.params.id);
-  assertBranchAccess(req, order.branchId);
+  assertOrderAccess(req, order);
   const paymentStatus = req.body?.paymentStatus === 'paid' ? 'paid' : 'unpaid';
   const method = PAYMENT_METHODS.includes(req.body?.method) ? req.body.method : null;
   if (paymentStatus === 'paid' && !method) throw bad('Choose how the customer paid: cash, transfer or POS.');

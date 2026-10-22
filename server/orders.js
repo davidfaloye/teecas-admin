@@ -12,16 +12,27 @@ export function isItemAvailable(item, branchId) {
 }
 
 // Creates an order from the ordering app. Prices always come from the database, never from
-// the client, and payment is always pay on delivery.
+// the client, and payment is always pay on delivery. The delivery fee is not included in the
+// total: it is settled with the rider.
+//
+// The app doesn't ask the customer for a branch. Those orders arrive unassigned (branchId null)
+// and every branch can see them; whoever accepts one picks the branch that will cook and deliver
+// it, based on distance and what that branch has in stock. A branchId can still be sent (e.g. by
+// a branch-specific page) and is then used as before.
 export async function createOrder(input, { channel = 'app' } = {}) {
-  const branchId = str(input.branchId, { field: 'Branch', required: true, max: 64 });
-  const branch = await col('branches').findOne({ _id: branchId });
-  if (!branch || branch.archived) throw bad('That branch was not found.', 'BRANCH_NOT_FOUND');
-  if (!branch.acceptingOrders) {
-    throw bad(`${branch.name} isn't taking orders right now.`, 'BRANCH_CLOSED');
+  let branch = null;
+  if (input.branchId) {
+    const branchId = str(input.branchId, { field: 'Branch', max: 64 });
+    branch = await col('branches').findOne({ _id: branchId });
+    if (!branch || branch.archived) throw bad('That branch was not found.', 'BRANCH_NOT_FOUND');
+    if (!branch.acceptingOrders) throw bad(`${branch.name} isn't taking orders right now.`, 'BRANCH_CLOSED');
+  } else {
+    const open = await col('branches').count({ archived: { $ne: true }, acceptingOrders: true });
+    if (!open) throw bad("Teecas isn't taking orders right now. Please try again later.", 'BRANCH_CLOSED');
   }
+  const branchId = branch?._id || null;
 
-  const fulfilment = input.fulfilment === 'pickup' ? 'pickup' : 'delivery';
+  const fulfilment = branch && input.fulfilment === 'pickup' ? 'pickup' : 'delivery';
   const c = input.customer || {};
   const customer = {
     name: str(c.name, { field: 'Your name', required: true, min: 2, max: 80 }),
@@ -49,34 +60,34 @@ export async function createOrder(input, { channel = 'app' } = {}) {
   const unavailable = [];
   for (const [id, qty] of qtyById) {
     const m = byId.get(id);
-    if (!m || !isItemAvailable(m, branchId)) {
+    if (!m || !(branchId ? isItemAvailable(m, branchId) : isItemOnMenu(m))) {
       unavailable.push(m?.name || 'An item');
       continue;
     }
     items.push({ itemId: m._id, name: m.name, price: m.price, qty, lineTotal: m.price * qty });
   }
   if (unavailable.length) {
-    const e = bad(`Sold out at ${branch.name}: ${unavailable.join(', ')}. Remove it to continue.`, 'ITEM_UNAVAILABLE');
+    const e = bad(`Sold out${branch ? ` at ${branch.name}` : ''}: ${unavailable.join(', ')}. Remove it to continue.`, 'ITEM_UNAVAILABLE');
     e.details = { unavailable };
     throw e;
   }
 
   const subtotal = items.reduce((s, i) => s + i.lineTotal, 0);
-  const deliveryFee = fulfilment === 'delivery' ? Number(branch.deliveryFee || 0) : 0;
   const now = new Date().toISOString();
   const number = (await nextSequence('order')) + 1000;
 
   const order = await col('orders').insertOne({
     number,
     branchId,
-    branchName: branch.name,
+    branchName: branch?.name || '',
     channel,
     customer,
     fulfilment,
     items,
     subtotal,
-    deliveryFee,
-    total: subtotal + deliveryFee,
+    deliveryFee: 0,
+    deliveryFeeExcluded: fulfilment === 'delivery',
+    total: subtotal,
     note,
     paymentMethod: 'pay_on_delivery',
     paymentStatus: 'unpaid',
@@ -86,13 +97,32 @@ export async function createOrder(input, { channel = 'app' } = {}) {
   });
 
   publish('order.created', order, branchId);
-  // Fire and forget: optional server-side WhatsApp message to the branch.
-  notifyBranch(order, branch).then((r) => {
+  const whatsapp = await orderWhatsapp(order, branch);
+  // Fire and forget: optional server-side WhatsApp message to the restaurant.
+  notifyBranch(order, { whatsapp: whatsapp.phone }).then((r) => {
     if (r.sent) col('orders').updateOne({ _id: order._id }, { $set: { branchNotifiedAt: new Date().toISOString() } });
   });
+  return { order, whatsapp };
+}
 
+export function isItemOnMenu(item) {
+  return !item.archived && item.isAvailable !== false;
+}
+
+// The WhatsApp number orders are sent to: the branch's own number once a branch has the order,
+// otherwise ORDERS_WHATSAPP, otherwise the first open branch's number.
+export async function ordersWhatsappNumber(branch) {
+  if (branch?.whatsapp) return branch.whatsapp;
+  if (process.env.ORDERS_WHATSAPP) return String(process.env.ORDERS_WHATSAPP).replace(/\D/g, '');
+  const branches = await col('branches').find({ archived: { $ne: true } }, { sort: { sort: 1, name: 1 } });
+  const b = branches.find((x) => x.acceptingOrders && x.whatsapp) || branches.find((x) => x.whatsapp);
+  return b?.whatsapp || '';
+}
+
+export async function orderWhatsapp(order, branch) {
+  const phone = await ordersWhatsappNumber(branch);
   const text = orderMessage(order, branch);
-  return { order, whatsapp: { phone: branch.whatsapp, text, url: waLink(branch.whatsapp, text) } };
+  return { phone, text, url: waLink(phone, text) };
 }
 
 // Status changes from the admin. Kitchen staff only move food through the kitchen.
@@ -100,7 +130,7 @@ const KITCHEN_MOVES = new Set(['accepted>preparing', 'preparing>ready']);
 
 // Moving an order to "completed" means delivered (or collected) and paid, so it records how
 // the customer paid unless that was already recorded.
-export async function changeStatus(order, nextStatus, user, reason = '', paymentMethod = null) {
+export async function changeStatus(order, nextStatus, user, reason = '', paymentMethod = null, assignBranchId = null) {
   const allowed = NEXT_STATUS[order.status] || [];
   if (!allowed.includes(nextStatus)) {
     throw bad(`An order that is ${order.status.replace(/_/g, ' ')} can't move to ${nextStatus.replace(/_/g, ' ')}.`, 'BAD_TRANSITION');
@@ -114,6 +144,15 @@ export async function changeStatus(order, nextStatus, user, reason = '', payment
   if (nextStatus === 'cancelled' && !reason) throw bad('Give a reason for cancelling.');
   const at = new Date().toISOString();
   const set = { status: nextStatus };
+  // An unassigned order gets its branch when it is accepted. Branch staff can only take an
+  // order for their own branch; the owner picks any open branch.
+  if (!order.branchId && nextStatus !== 'cancelled') {
+    const branchId = user.role === 'owner' ? assignBranchId : user.branchId;
+    if (!branchId) throw bad('Choose the branch that will prepare and deliver this order.', 'BRANCH_REQUIRED');
+    const branch = await col('branches').findOne({ _id: String(branchId) });
+    if (!branch || branch.archived) throw bad('That branch was not found.', 'BRANCH_NOT_FOUND');
+    Object.assign(set, { branchId: branch._id, branchName: branch.name, assignedBy: user.name, assignedAt: at });
+  }
   if (nextStatus === 'completed') {
     set.completedAt = at;
     if (order.paymentStatus !== 'paid') {
@@ -130,6 +169,7 @@ export async function changeStatus(order, nextStatus, user, reason = '', payment
   );
   if (!updated) throw bad('Someone else just updated this order. Refresh and try again.', 'CONFLICT');
   publish('order.updated', updated, updated.branchId);
+  if (!order.branchId && updated.branchId) publish('order.updated', updated, null); // let other branches drop it
   return updated;
 }
 
@@ -152,6 +192,7 @@ export function publicOrder(o) {
     items: o.items.map(({ name, qty, price, lineTotal }) => ({ name, qty, price, lineTotal })),
     subtotal: o.subtotal,
     deliveryFee: o.deliveryFee,
+    deliveryFeeExcluded: Boolean(o.deliveryFeeExcluded),
     total: o.total,
     paymentMethod: o.paymentMethod,
     paymentStatus: o.paymentStatus,

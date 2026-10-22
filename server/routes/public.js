@@ -3,9 +3,8 @@
 import { Router } from 'express';
 import cors from 'cors';
 import { col } from '../db.js';
-import { createOrder, isItemAvailable, publicOrder, getOrderOr404 } from '../orders.js';
+import { createOrder, isItemAvailable, isItemOnMenu, publicOrder, getOrderOr404, orderWhatsapp } from '../orders.js';
 import { rateLimit, notFound } from '../lib.js';
-import { orderMessage, waLink } from '../whatsapp.js';
 
 const r = Router();
 r.use(cors());
@@ -55,7 +54,7 @@ r.get('/menu', async (req, res) => {
       emoji: m.emoji || '',
       imageUrl: m.imageUrl || '',
       popular: Boolean(m.popular),
-      available: branchId ? isItemAvailable(m, branchId) : m.isAvailable !== false,
+      available: branchId ? isItemAvailable(m, branchId) : isItemOnMenu(m),
     })),
   });
 });
@@ -70,12 +69,11 @@ r.post('/orders', orderLimiter, async (req, res) => {
 r.get('/orders/:id', async (req, res) => {
   const order = await getOrderOr404(req.params.id);
   if (!req.query.token || req.query.token !== order.trackingToken) throw notFound('Order not found.');
-  const branch = await col('branches').findOne({ _id: order.branchId });
-  const text = branch ? orderMessage(order, branch) : '';
+  const branch = order.branchId ? await col('branches').findOne({ _id: order.branchId }) : null;
   res.json({
     order: publicOrder(order),
     branch: branch ? publicBranch(branch) : null,
-    whatsapp: branch ? { phone: branch.whatsapp, text, url: waLink(branch.whatsapp, text) } : null,
+    whatsapp: await orderWhatsapp(order, branch),
   });
 });
 

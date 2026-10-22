@@ -274,6 +274,11 @@ table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
 .kitchen .ticket ul { font-size: 18px; font-weight: 600; }
 .kitchen .ticket .top { font-size: 16px; }
 
+.chip.unassigned { background: var(--accent-soft); border-color: var(--accent); color: var(--bad); }
+.accept-pick { display: grid; gap: 6px; flex: 1; min-width: 0; }
+.accept-pick select.input { flex: 1; min-width: 0; padding: 5px 8px; font-size: 13px; }
+.modal-foot .accept-pick { flex: none; display: flex; }
+.modal-foot .accept-pick select.input { width: 200px; padding: 9px 10px; font-size: 14px; }
 .pay-pick { display: grid; gap: 6px; padding: 10px; background: var(--good-soft); border: 1.5px solid var(--good); }
 .pay-pick .row .btn { flex: 1; }
 

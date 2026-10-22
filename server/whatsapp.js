@@ -19,9 +19,9 @@ export function orderMessage(order, branch) {
     ...lines,
     '',
     `Order: #${order.number}`,
-    `Branch: ${branch.name}`,
+    ...(branch?.name && order.branchId ? [`Branch: ${branch.name}`] : []),
     order.fulfilment === 'delivery' ? `Delivery to: ${order.customer.address}` : 'Pickup at the branch',
-    `Total: ${naira(order.total)} (pay on delivery)`,
+    `Total: ${naira(order.total)} (pay on delivery${order.deliveryFeeExcluded ? ', delivery fee excluded' : ''})`,
     `Name: ${order.customer.name}`,
     `Phone: ${order.customer.phone}`,
   ];

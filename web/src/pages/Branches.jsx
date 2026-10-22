@@ -47,7 +47,7 @@ export default function Branches() {
             <div className="lines small">
               <Line k="WhatsApp" v={`+${b.whatsapp}`} />
               <Line k="Hours" v={b.hours || '—'} />
-              <Line k="Delivery fee" v={naira(b.deliveryFee || 0)} />
+              <Line k="Usual delivery fee" v={naira(b.deliveryFee || 0)} />
             </div>
             <label className="row" style={{ justifyContent: 'space-between', paddingTop: 8, borderTop: '1px solid var(--line-2)' }}>
               <span>
@@ -157,7 +157,7 @@ function BranchForm({ branch, canDelete, onClose, onSaved }) {
         <Field label="WhatsApp number" hint="orders go here">
           <input className="input num" value={f.whatsapp} onChange={set('whatsapp')} placeholder="+234 808 852 4502" />
         </Field>
-        <Field label="Delivery fee (₦)">
+        <Field label="Usual delivery fee (₦)" hint="for reference; not added to order totals">
           <input className="input num" inputMode="numeric" value={f.deliveryFee} onChange={set('deliveryFee')} />
         </Field>
         <Field label="Opening hours" className="full">

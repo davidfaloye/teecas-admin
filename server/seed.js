@@ -266,10 +266,9 @@ async function sampleOrders({ branches, items, rand, pick, between, days }) {
           at = dayStart + hour * 3600e3 + between(0, 59) * 60e3;
         }
         if (at > now - 60e3) continue;
-        const fulfilment = rand() < 0.7 ? 'delivery' : 'pickup';
+        const fulfilment = 'delivery'; // the app takes delivery orders only
         const lines = basket();
         const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
-        const deliveryFee = fulfilment === 'delivery' ? b.deliveryFee : 0;
         const createdAt = new Date(at).toISOString();
         let status = rand() < 0.06 ? 'cancelled' : 'completed';
         // Today's most recent orders are still moving through the kitchen.
@@ -288,8 +287,9 @@ async function sampleOrders({ branches, items, rand, pick, between, days }) {
         orders.push({
           _id: crypto.randomUUID(),
           number: ++number,
-          branchId: b._id,
-          branchName: b.name,
+          // New orders arrive without a branch; a branch takes them when it accepts.
+          branchId: status === 'placed' ? null : b._id,
+          branchName: status === 'placed' ? '' : b.name,
           channel: 'app',
           customer: {
             name: `${first} ${pick(LAST)}`,
@@ -299,8 +299,9 @@ async function sampleOrders({ branches, items, rand, pick, between, days }) {
           fulfilment,
           items: lines,
           subtotal,
-          deliveryFee,
-          total: subtotal + deliveryFee,
+          deliveryFee: 0,
+          deliveryFeeExcluded: true,
+          total: subtotal,
           note: rand() < 0.1 ? pick(['Extra pepper please', 'No pepper', 'Call when you get to the gate', 'Separate the soup']) : '',
           paymentMethod: 'pay_on_delivery',
           paymentStatus: status === 'completed' ? 'paid' : 'unpaid',

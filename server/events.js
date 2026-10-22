@@ -24,7 +24,8 @@ export function subscribe(req, res) {
 export function publish(type, payload, branchId) {
   const data = `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`;
   for (const c of clients) {
-    if (c.user.role !== 'owner' && c.user.branchId !== branchId) continue;
+    // Unassigned orders (branchId null) go to everyone, since any branch may take them.
+    if (branchId && c.user.role !== 'owner' && c.user.branchId !== branchId) continue;
     c.res.write(data);
   }
 }

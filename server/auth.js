@@ -71,3 +71,16 @@ export function assertBranchAccess(req, branchId) {
   if (req.user.role === 'owner') return;
   if (!branchId || req.user.branchId !== branchId) throw forbidden('That belongs to another branch.');
 }
+
+// Orders: staff see their own branch's orders plus unassigned ones, which any branch may take.
+export function orderBranchFilter(req, requested = req.query.branchId) {
+  if (req.user.role === 'owner') {
+    return requested && requested !== 'all' ? { branchId: { $in: [String(requested), null] } } : {};
+  }
+  return { branchId: { $in: [req.user.branchId || '__none__', null] } };
+}
+
+export function assertOrderAccess(req, order) {
+  if (!order.branchId) return;
+  assertBranchAccess(req, order.branchId);
+}

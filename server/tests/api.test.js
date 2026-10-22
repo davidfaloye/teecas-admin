@@ -53,10 +53,12 @@ test('customer order: priced on the server, pay on delivery, WhatsApp message to
     },
   });
   assert.equal(status, 201);
-  assert.equal(data.order.total, amala.price * 2 + branch.deliveryFee);
+  assert.equal(data.order.total, amala.price * 2); // delivery fee is settled with the rider
+  assert.equal(data.order.deliveryFee, 0);
   assert.equal(data.order.paymentMethod, 'pay_on_delivery');
   assert.match(data.whatsapp.url, new RegExp(`^https://wa.me/${branch.whatsapp}\\?text=`));
   assert.match(data.whatsapp.text, /Amala ~ 2/);
+  assert.match(data.whatsapp.text, /delivery fee excluded/);
 
   const track = await call('GET', `/api/public/orders/${data.order.id}?token=${data.order.trackingToken}`);
   assert.equal(track.data.order.status, 'placed');
@@ -148,4 +150,46 @@ test('board flow: incoming -> accepted -> out for delivery -> delivered & paid',
   await pmove('accepted');
   assert.equal((await pmove('out_for_delivery')).data.code, 'BAD_TRANSITION');
   assert.equal((await pmove('completed', { paymentMethod: 'cash' })).data.order.status, 'completed');
+});
+
+test('app orders without a branch: every branch sees them, the one that accepts takes them', async () => {
+  const owner = await login('owner@teecas.online');
+  const ogba = await login('ogba@teecas.online');
+  const uniben = await login('uniben@teecas.online');
+  const { data: m } = await call('GET', '/api/public/menu');
+  const item = m.items.find((i) => i.available);
+  const placed = await call('POST', '/api/public/orders', {
+    body: { fulfilment: 'pickup', customer: { name: 'No Branch', phone: '08031234567', address: '3 Test Street, Benin City' }, items: [{ id: item.id, qty: 3 }] },
+  });
+  assert.equal(placed.status, 201);
+  const o = placed.data.order;
+  assert.equal(o.branchId, null);
+  assert.equal(o.fulfilment, 'delivery'); // no branch, so no pickup
+  assert.equal(o.total, item.price * 3);
+  assert.match(placed.data.whatsapp.url, /^https:\/\/wa.me\/\d+\?text=/);
+  assert.doesNotMatch(placed.data.whatsapp.text, /Branch:/);
+
+  // Every branch's staff can see it.
+  for (const t of [ogba, uniben]) {
+    const list = await call('GET', '/api/orders?status=placed', { token: t });
+    assert.ok(list.data.orders.some((x) => x._id === o.id));
+  }
+  // The owner must say which branch; branch staff take it for their own branch.
+  const noBranch = await call('PATCH', `/api/orders/${o.id}/status`, { token: owner, body: { status: 'accepted' } });
+  assert.equal(noBranch.data.code, 'BRANCH_REQUIRED');
+  const taken = await call('PATCH', `/api/orders/${o.id}/status`, { token: uniben, body: { status: 'accepted' } });
+  assert.equal(taken.data.order.branchName, 'Uniben');
+  // Now it belongs to Uniben only.
+  assert.equal((await call('GET', `/api/orders/${o.id}`, { token: ogba })).status, 403);
+  const tracking = await call('GET', `/api/public/orders/${o.id}?token=${placed.data.order.trackingToken}`);
+  assert.equal(tracking.data.order.branchName, 'Uniben');
+
+  // Owner assigns explicitly.
+  const second = await call('POST', '/api/public/orders', {
+    body: { customer: { name: 'Owner Pick', phone: '08031234567', address: '4 Test Street, Benin City' }, items: [{ id: item.id, qty: 1 }] },
+  });
+  const { data: b } = await call('GET', '/api/public/branches');
+  const ring = b.branches.find((x) => x.name === 'Ring Road');
+  const picked = await call('PATCH', `/api/orders/${second.data.order.id}/status`, { token: owner, body: { status: 'accepted', branchId: ring.id } });
+  assert.equal(picked.data.order.branchId, ring.id);
 });
