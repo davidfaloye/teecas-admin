@@ -14,24 +14,29 @@ export const ORDER_STATUSES = [
   'cancelled',
 ];
 
-// Which status can follow which. "out_for_delivery" is only for delivery orders.
+// Which status can follow which. The board runs: placed (incoming) -> accepted ->
+// out_for_delivery -> completed (delivered & paid). Pickup orders skip out_for_delivery.
+// "preparing" and "ready" are kept for the kitchen view (currently switched off) and for
+// older orders; they sit in the Accepted column.
 export const NEXT_STATUS = {
   placed: ['accepted', 'cancelled'],
-  accepted: ['preparing', 'cancelled'],
-  preparing: ['ready', 'cancelled'],
+  accepted: ['out_for_delivery', 'completed', 'preparing', 'cancelled'],
+  preparing: ['ready', 'out_for_delivery', 'completed', 'cancelled'],
   ready: ['out_for_delivery', 'completed', 'cancelled'],
   out_for_delivery: ['completed', 'cancelled'],
   completed: [],
   cancelled: [],
 };
 
+export const PAYMENT_METHODS = ['cash', 'transfer', 'pos'];
+
 export const STATUS_LABEL = {
-  placed: 'Placed',
+  placed: 'Incoming',
   accepted: 'Accepted',
   preparing: 'Preparing',
   ready: 'Ready',
   out_for_delivery: 'Out for delivery',
-  completed: 'Completed',
+  completed: 'Delivered & paid',
   cancelled: 'Cancelled',
 };
 

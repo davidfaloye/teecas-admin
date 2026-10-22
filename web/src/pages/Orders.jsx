@@ -1,13 +1,46 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useApp, useLoad, useOrderEvents, ErrorBox, Loading, StatusBadge, Modal, Icon, Field } from '../ui.jsx';
-import { naira, time, ago, dateTime, nextAction, STATUS_LABEL, todayKey, addDays } from '../format.js';
+import { naira, time, ago, dateTime, nextAction, STATUS_LABEL, PAY_METHODS, todayKey, addDays } from '../format.js';
 
-const BOARD = ['placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
+// The four columns of the live board. "preparing" and "ready" (used by the kitchen view and by
+// older orders) sit in Accepted.
+const COLUMNS = [
+  {
+    id: 'incoming',
+    title: 'Incoming order',
+    statuses: ['placed'],
+    color: 'var(--accent)',
+    help: 'New orders from the app, waiting for this branch. Check the items and the customer’s details, then tap Accept order. If you can’t fill it, open the order and cancel it with a reason; the customer sees the reason.',
+  },
+  {
+    id: 'accepted',
+    title: 'Accepted order',
+    statuses: ['accepted', 'preparing', 'ready'],
+    color: 'var(--warn)',
+    help: 'The branch has confirmed the order and the kitchen is making it. When it’s packed, tap Send out for delivery. Pickup orders skip delivery: tap Collected & paid when the customer picks it up and pays.',
+  },
+  {
+    id: 'out',
+    title: 'Out for delivery',
+    statuses: ['out_for_delivery'],
+    color: 'var(--violet)',
+    help: 'The rider has the food and is on the way. The customer pays on arrival by cash, transfer or POS. When the rider confirms, tap Delivered & paid and choose how they paid.',
+  },
+  {
+    id: 'done',
+    title: 'Order delivered & paid',
+    statuses: ['completed'],
+    color: 'var(--good)',
+    help: 'Finished: the customer has the food and the money is collected. Only today’s orders show here; older ones are under History. These count towards sales.',
+  },
+];
+const ACTIVE = ['placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
+const DONE_SHOWN = 25;
 
 export default function Orders() {
-  const { branchId, user } = useApp();
-  const [tab, setTab] = useState(user.role === 'kitchen' ? 'kitchen' : 'board');
+  const { branchId } = useApp();
+  const [tab, setTab] = useState('board');
   const [openId, setOpenId] = useState(null);
   const scopeQ = branchId === 'all' ? undefined : branchId;
 
@@ -17,7 +50,9 @@ export default function Orders() {
         <div className="seg" role="tablist">
           {[
             ['board', 'Live board'],
-            ['kitchen', 'Kitchen view'],
+            // Kitchen view is switched off for now. To bring it back, uncomment this line and
+            // pass kitchen={tab === 'kitchen'} to <Board> below (its columns are in KITCHEN_COLUMNS).
+            // ['kitchen', 'Kitchen view'],
             ['history', 'History'],
           ].map(([id, label]) => (
             <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>
@@ -25,74 +60,113 @@ export default function Orders() {
             </button>
           ))}
         </div>
-        <span className="muted small">Payment on every order: pay on delivery</span>
+        <span className="muted small">Every order is pay on delivery</span>
       </div>
-      {tab === 'history' ? (
-        <History branchQ={scopeQ} onOpen={setOpenId} />
-      ) : (
-        <Board branchQ={scopeQ} kitchen={tab === 'kitchen'} onOpen={setOpenId} />
-      )}
+      {tab === 'history' ? <History branchQ={scopeQ} onOpen={setOpenId} /> : <Board branchQ={scopeQ} onOpen={setOpenId} />}
       {openId && <OrderDetail id={openId} onClose={() => setOpenId(null)} />}
     </div>
   );
 }
 
-function Board({ branchQ, kitchen, onOpen }) {
+/* Kitchen view (switched off): big-type tickets moving accepted -> preparing -> ready.
+const KITCHEN_COLUMNS = [
+  { id: 'k-new', title: 'Accepted', statuses: ['accepted'], color: 'var(--warn)', help: 'Accepted orders waiting to be cooked.' },
+  { id: 'k-cook', title: 'Preparing', statuses: ['preparing'], color: 'var(--warn)', help: 'Being cooked now.' },
+  { id: 'k-ready', title: 'Ready', statuses: ['ready'], color: 'var(--good)', help: 'Packed and waiting for the rider or the customer.' },
+];
+*/
+
+export function Help({ text, end }) {
+  return (
+    <span className={`help ${end ? 'end' : ''}`}>
+      <button type="button" className="help-btn" aria-label="What does this mean?">
+        ?
+      </button>
+      <span className="help-tip" role="tooltip">
+        {text}
+      </span>
+    </span>
+  );
+}
+
+function Board({ branchQ, onOpen }) {
   const { notify, user } = useApp();
   const [fresh, setFresh] = useState(() => new Set());
   const [, tick] = useState(0);
-  const { data, error, loading, reload, setData } = useLoad(
-    () => api('/orders', { query: { status: BOARD.join(','), branchId: branchQ, limit: 300 } }),
-    [branchQ],
-  );
+  const today = todayKey();
+  const { data, error, loading, reload, setData } = useLoad(async () => {
+    const [active, done] = await Promise.all([
+      api('/orders', { query: { status: ACTIVE.join(','), branchId: branchQ, limit: 300 } }),
+      api('/orders', { query: { status: 'completed', branchId: branchQ, from: today, to: today, limit: 300 } }),
+    ]);
+    return { orders: [...active.orders, ...done.orders] };
+  }, [branchQ, today]);
+
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 30000);
     return () => clearInterval(t);
   }, []);
-  useOrderEvents((type, order) => {
-    if (branchQ && order.branchId !== branchQ) return;
+
+  const keep = (o) => ACTIVE.includes(o.status) || o.status === 'completed';
+  const upsert = (order) =>
     setData((d) => {
       if (!d) return d;
       const rest = d.orders.filter((o) => o._id !== order._id);
-      return { orders: BOARD.includes(order.status) ? [order, ...rest] : rest };
+      return { orders: keep(order) ? [order, ...rest] : rest };
     });
+
+  useOrderEvents((type, order) => {
+    if (branchQ && order.branchId !== branchQ) return;
+    upsert(order);
     if (type === 'order.created') {
       setFresh((s) => new Set(s).add(order._id));
       setTimeout(() => setFresh((s) => { const n = new Set(s); n.delete(order._id); return n; }), 4000);
     }
   });
 
-  async function move(order, to) {
+  async function move(order, to, paymentMethod) {
     try {
-      const d = await api(`/orders/${order._id}/status`, { method: 'PATCH', body: { status: to } });
-      setData((s) => ({ orders: BOARD.includes(d.order.status) ? s.orders.map((o) => (o._id === d.order._id ? d.order : o)) : s.orders.filter((o) => o._id !== d.order._id) }));
+      const d = await api(`/orders/${order._id}/status`, { method: 'PATCH', body: { status: to, paymentMethod } });
+      upsert(d.order);
+      return true;
     } catch (e) {
       notify(e.message, 'err');
       reload(true);
+      return false;
     }
   }
 
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox error={error} onRetry={reload} />;
-  const cols = kitchen ? ['placed', 'accepted', 'preparing', 'ready'] : BOARD;
   const showBranch = !branchQ && user.role === 'owner';
 
   return (
-    <div className={`board ${kitchen ? 'kitchen' : ''}`} style={kitchen ? { gridTemplateColumns: 'repeat(4, minmax(240px, 1fr))' } : undefined}>
-      {cols.map((status) => {
-        const list = data.orders.filter((o) => o.status === status).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    <div className="board">
+      {COLUMNS.map((c, ci) => {
+        const done = c.id === 'done';
+        const list = data.orders
+          .filter((o) => c.statuses.includes(o.status))
+          .sort((a, b) => (done ? (b.completedAt || b.updatedAt).localeCompare(a.completedAt || a.updatedAt) : a.createdAt.localeCompare(b.createdAt)));
+        const shown = done ? list.slice(0, DONE_SHOWN) : list;
         return (
-          <section className="col" key={status} aria-label={STATUS_LABEL[status]}>
+          <section className="col" key={c.id} aria-label={c.title}>
             <div className="col-head">
-              <span>{STATUS_LABEL[status]}</span>
+              <span className="dot" style={{ background: c.color }} />
+              <span>{c.title}</span>
+              <Help text={c.help} end={ci === COLUMNS.length - 1} />
               <span className="n">{list.length}</span>
             </div>
             <div className="col-body">
-              {list.length === 0 && <div className="muted small" style={{ padding: '8px 4px' }}>Nothing here</div>}
-              {list.map((o) => (
-                <Ticket key={o._id} order={o} fresh={fresh.has(o._id)} showBranch={showBranch} kitchen={kitchen} onOpen={() => onOpen(o._id)} onMove={(to) => move(o, to)} canAct={canAct(user.role, o)} />
-              ))}
+              {list.length === 0 && <div className="muted small" style={{ padding: '8px 4px' }}>{done ? 'None yet today' : 'Nothing here'}</div>}
+              {shown.map((o) =>
+                done ? (
+                  <DoneTicket key={o._id} order={o} showBranch={showBranch} onOpen={() => onOpen(o._id)} />
+                ) : (
+                  <Ticket key={o._id} order={o} fresh={fresh.has(o._id)} showBranch={showBranch} onOpen={() => onOpen(o._id)} onMove={(to, pm) => move(o, to, pm)} canAct={canAct(user.role, o)} />
+                ),
+              )}
             </div>
+            {done && list.length > DONE_SHOWN && <div className="col-foot">{list.length - DONE_SHOWN} more today in History</div>}
           </section>
         );
       })}
@@ -100,17 +174,43 @@ function Board({ branchQ, kitchen, onOpen }) {
   );
 }
 
+// Kitchen accounts only move food through the kitchen view, so they watch the board read-only.
 function canAct(role, o) {
-  const a = nextAction(o);
-  if (!a) return false;
-  if (role === 'kitchen') return (o.status === 'accepted' && a.to === 'preparing') || (o.status === 'preparing' && a.to === 'ready');
-  return true;
+  return Boolean(nextAction(o)) && role !== 'kitchen';
 }
 
-function Ticket({ order: o, fresh, showBranch, kitchen, onOpen, onMove, canAct }) {
-  const a = nextAction(o);
+function PayPicker({ label, onPick, onCancel, busy }) {
   return (
-    <article className={`ticket ${o.status} ${fresh ? 'fresh' : ''}`} onClick={onOpen} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onOpen()}>
+    <div className="pay-pick" onClick={(e) => e.stopPropagation()}>
+      <span className="small" style={{ fontWeight: 600, color: 'var(--good)' }}>
+        {label}: how did they pay?
+      </span>
+      <div className="row" style={{ gap: 6 }}>
+        {PAY_METHODS.map(([m, l]) => (
+          <button key={m} className="btn sm good" disabled={busy} onClick={() => onPick(m)}>
+            {l}
+          </button>
+        ))}
+      </div>
+      <button className="btn sm ghost" onClick={onCancel}>
+        Not yet
+      </button>
+    </div>
+  );
+}
+
+function Ticket({ order: o, fresh, showBranch, onOpen, onMove, canAct }) {
+  const a = nextAction(o);
+  const [paying, setPaying] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const go = async (pm) => {
+    setBusy(true);
+    const ok = await onMove(a.to, pm);
+    setBusy(false);
+    if (ok) setPaying(false);
+  };
+  return (
+    <article className={`ticket ${o.status} ${fresh ? 'fresh' : ''}`} onClick={onOpen} tabIndex={0} onKeyDown={(e) => e.target === e.currentTarget && e.key === 'Enter' && onOpen()}>
       <div className="top">
         <b>#{o.number}</b>
         <span title={dateTime(o.createdAt)}>{ago(o.createdAt)}</span>
@@ -118,13 +218,12 @@ function Ticket({ order: o, fresh, showBranch, kitchen, onOpen, onMove, canAct }
       <div className="row wrap" style={{ gap: 6 }}>
         <span className="chip">{o.fulfilment === 'delivery' ? 'Delivery' : 'Pickup'}</span>
         {showBranch && <span className="chip">{o.branchName}</span>}
+        {o.paymentStatus === 'paid' && <span className="badge paid">Paid</span>}
       </div>
-      {!kitchen && (
-        <div className="small">
-          <b>{o.customer.name}</b>
-          {o.fulfilment === 'delivery' && <div className="muted">{o.customer.address}</div>}
-        </div>
-      )}
+      <div className="small">
+        <b>{o.customer.name}</b>
+        {o.fulfilment === 'delivery' && <div className="muted">{o.customer.address}</div>}
+      </div>
       <ul>
         {o.items.map((i) => (
           <li key={i.itemId || i.name}>
@@ -133,19 +232,40 @@ function Ticket({ order: o, fresh, showBranch, kitchen, onOpen, onMove, canAct }
         ))}
       </ul>
       {o.note && <div className="notice small">Note: {o.note}</div>}
-      {!kitchen && (
-        <div className="spread small">
-          <span className="muted">Pay on delivery</span>
-          <b className="num">{naira(o.total)}</b>
-        </div>
-      )}
-      {a && canAct && (
+      <div className="spread small">
+        <span className="muted">{o.paymentStatus === 'paid' ? `Paid by ${o.paidWith}` : 'To collect'}</span>
+        <b className="num">{naira(o.total)}</b>
+      </div>
+      {a && canAct && (paying ? (
+        <PayPicker label={a.label} busy={busy} onPick={go} onCancel={() => setPaying(false)} />
+      ) : (
         <div className="acts" onClick={(e) => e.stopPropagation()}>
-          <button className={`btn sm ${o.status === 'placed' ? 'primary' : 'gold'}`} onClick={() => onMove(a.to)}>
+          <button className={`btn sm ${o.status === 'placed' ? 'primary' : a.to === 'completed' ? 'good' : 'gold'}`} disabled={busy} onClick={() => (a.pay ? setPaying(true) : go())}>
             {a.label}
           </button>
         </div>
-      )}
+      ))}
+    </article>
+  );
+}
+
+function DoneTicket({ order: o, showBranch, onOpen }) {
+  return (
+    <article className="ticket completed done" onClick={onOpen} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onOpen()}>
+      <div className="top">
+        <b>#{o.number}</b>
+        <span>{time(o.completedAt || o.updatedAt)}</span>
+      </div>
+      <div className="row small" style={{ flexWrap: 'nowrap' }}>
+        <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {o.customer.name}
+          {showBranch ? <span className="muted"> · {o.branchName}</span> : null}
+        </span>
+        <b className="num">{naira(o.total)}</b>
+      </div>
+      <div className="muted small">
+        {o.fulfilment === 'delivery' ? 'Delivered' : 'Collected'} · paid by {o.paidWith === 'pos' ? 'POS' : o.paidWith || '—'}
+      </div>
     </article>
   );
 }
@@ -252,7 +372,8 @@ function OrderDetail({ id, onClose }) {
       setBusy(false);
     }
   }
-  const move = (to, why) => run(() => api(`/orders/${id}/status`, { method: 'PATCH', body: { status: to, reason: why } }));
+  const [paying, setPaying] = useState(false);
+  const move = (to, why, paymentMethod) => run(() => api(`/orders/${id}/status`, { method: 'PATCH', body: { status: to, reason: why, paymentMethod } }));
   const pay = (method) => run(() => api(`/orders/${id}/payment`, { method: 'PATCH', body: { paymentStatus: 'paid', method } }));
   const unpay = () => run(() => api(`/orders/${id}/payment`, { method: 'PATCH', body: { paymentStatus: 'unpaid' } }));
 
@@ -273,10 +394,25 @@ function OrderDetail({ id, onClose }) {
                 Cancel order
               </button>
             )}
-            {a && canAct(user.role, o) && (
-              <button className="btn primary" disabled={busy} onClick={() => move(a.to)}>
+            {a && canAct(user.role, o) && !paying && (
+              <button className={`btn ${a.to === 'completed' ? 'good' : 'primary'}`} disabled={busy} onClick={() => (a.pay ? setPaying(true) : move(a.to))}>
                 {a.label}
               </button>
+            )}
+            {a && paying && (
+              <>
+                <span className="small" style={{ alignSelf: 'center', fontWeight: 600 }}>
+                  {a.label}, paid by:
+                </span>
+                {PAY_METHODS.map(([m, l]) => (
+                  <button key={m} className="btn good" disabled={busy} onClick={async () => (await move(a.to, undefined, m)) && setPaying(false)}>
+                    {l}
+                  </button>
+                ))}
+                <button className="btn ghost" onClick={() => setPaying(false)}>
+                  Back
+                </button>
+              </>
             )}
           </>
         )
@@ -372,10 +508,10 @@ function OrderDetail({ id, onClose }) {
                 </div>
               ) : canPay && o.status !== 'cancelled' ? (
                 <div className="row wrap">
-                  <span className="muted small">Collected? Record it:</span>
-                  {['cash', 'transfer', 'pos'].map((m) => (
+                  <span className="muted small">Paid before delivery (e.g. transfer)? Record it:</span>
+                  {PAY_METHODS.map(([m, l]) => (
                     <button key={m} className="btn sm" disabled={busy} onClick={() => pay(m)}>
-                      {m === 'pos' ? 'POS' : m[0].toUpperCase() + m.slice(1)}
+                      {l}
                     </button>
                   ))}
                 </div>

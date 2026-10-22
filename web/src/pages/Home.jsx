@@ -49,7 +49,7 @@ export default function Home() {
                     <td>
                       <b>{b.name}</b>
                     </td>
-                    <td>{b.acceptingOrders ? <span className="badge ready">Open</span> : <span className="badge cancelled">Paused</span>}</td>
+                    <td>{b.acceptingOrders ? <span className="badge paid">Open</span> : <span className="badge cancelled">Paused</span>}</td>
                     <td className="r num">{b.orders}</td>
                     <td className="r num">{b.open}</td>
                     <td className="r num">{naira(b.revenue)}</td>

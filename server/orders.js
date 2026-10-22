@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { col, nextSequence } from './db.js';
 import { publish } from './events.js';
 import { orderMessage, waLink, notifyBranch } from './whatsapp.js';
-import { bad, notFound, forbidden, str, num, normalizePhone, NEXT_STATUS } from './lib.js';
+import { bad, notFound, forbidden, str, num, normalizePhone, NEXT_STATUS, PAYMENT_METHODS } from './lib.js';
 
 const MAX_LINES = 40;
 const MAX_QTY = 50;
@@ -98,13 +98,15 @@ export async function createOrder(input, { channel = 'app' } = {}) {
 // Status changes from the admin. Kitchen staff only move food through the kitchen.
 const KITCHEN_MOVES = new Set(['accepted>preparing', 'preparing>ready']);
 
-export async function changeStatus(order, nextStatus, user, reason = '') {
+// Moving an order to "completed" means delivered (or collected) and paid, so it records how
+// the customer paid unless that was already recorded.
+export async function changeStatus(order, nextStatus, user, reason = '', paymentMethod = null) {
   const allowed = NEXT_STATUS[order.status] || [];
   if (!allowed.includes(nextStatus)) {
     throw bad(`An order that is ${order.status.replace(/_/g, ' ')} can't move to ${nextStatus.replace(/_/g, ' ')}.`, 'BAD_TRANSITION');
   }
   if (nextStatus === 'out_for_delivery' && order.fulfilment !== 'delivery') {
-    throw bad('Pickup orders go straight from ready to completed.', 'BAD_TRANSITION');
+    throw bad('Pickup orders are marked delivered & paid when the customer collects them.', 'BAD_TRANSITION');
   }
   if (user.role === 'kitchen' && !KITCHEN_MOVES.has(`${order.status}>${nextStatus}`)) {
     throw forbidden('Kitchen accounts can only move orders to preparing and ready.');
@@ -112,7 +114,15 @@ export async function changeStatus(order, nextStatus, user, reason = '') {
   if (nextStatus === 'cancelled' && !reason) throw bad('Give a reason for cancelling.');
   const at = new Date().toISOString();
   const set = { status: nextStatus };
-  if (nextStatus === 'completed') set.completedAt = at;
+  if (nextStatus === 'completed') {
+    set.completedAt = at;
+    if (order.paymentStatus !== 'paid') {
+      if (!PAYMENT_METHODS.includes(paymentMethod)) {
+        throw bad('Choose how the customer paid: cash, transfer or POS.', 'PAYMENT_REQUIRED');
+      }
+      Object.assign(set, { paymentStatus: 'paid', paidWith: paymentMethod, paidAt: at, paymentRecordedBy: user.name });
+    }
+  }
   if (nextStatus === 'cancelled') set.cancelReason = reason;
   const updated = await col('orders').updateOne(
     { _id: order._id, status: order.status },

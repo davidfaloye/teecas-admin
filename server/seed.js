@@ -275,14 +275,14 @@ async function sampleOrders({ branches, items, rand, pick, between, days }) {
         // Today's most recent orders are still moving through the kitchen.
         const ageMin = (now - at) / 60e3;
         if (d === 0 && status !== 'cancelled' && ageMin < 120) {
-          status = ageMin < 15 ? 'placed' : ageMin < 30 ? 'accepted' : ageMin < 50 ? 'preparing' : ageMin < 70 ? 'ready' : fulfilment === 'delivery' && ageMin < 95 ? 'out_for_delivery' : 'completed';
+          status = ageMin < 15 ? 'placed' : ageMin < 50 ? 'accepted' : fulfilment === 'delivery' && ageMin < 80 ? 'out_for_delivery' : 'completed';
         }
-        const flow = ['placed', 'accepted', 'preparing', 'ready', ...(fulfilment === 'delivery' ? ['out_for_delivery'] : []), 'completed'];
+        const flow = ['placed', 'accepted', ...(fulfilment === 'delivery' ? ['out_for_delivery'] : []), 'completed'];
         const history = [];
         if (status === 'cancelled') {
           history.push({ status: 'placed', at: createdAt, by: 'customer' }, { status: 'cancelled', at: new Date(at + 6 * 60e3).toISOString(), by: `${b.name} Manager`, reason: pick(['Customer could not be reached', 'Customer cancelled on WhatsApp', 'Item ran out']) });
         } else {
-          for (let i = 0; i <= flow.indexOf(status); i++) history.push({ status: flow[i], at: new Date(at + i * 12 * 60e3).toISOString(), by: i === 0 ? 'customer' : `${b.name} Manager` });
+          for (let i = 0; i <= flow.indexOf(status); i++) history.push({ status: flow[i], at: new Date(at + i * 20 * 60e3).toISOString(), by: i === 0 ? 'customer' : `${b.name} Manager` });
         }
         const first = pick(FIRST);
         orders.push({

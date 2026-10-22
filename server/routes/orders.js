@@ -3,7 +3,7 @@ import { col } from '../db.js';
 import { branchFilter, assertBranchAccess, requireRole } from '../auth.js';
 import { changeStatus, getOrderOr404 } from '../orders.js';
 import { publish } from '../events.js';
-import { ORDER_STATUSES, bad, str, startOfLocalDay, addDays } from '../lib.js';
+import { ORDER_STATUSES, PAYMENT_METHODS, bad, forbidden, str, startOfLocalDay, addDays } from '../lib.js';
 
 const r = Router();
 
@@ -45,7 +45,8 @@ r.patch('/:id/status', async (req, res) => {
   const status = String(req.body?.status || '');
   if (!ORDER_STATUSES.includes(status)) throw bad('Unknown status.');
   const reason = str(req.body?.reason, { field: 'Reason', max: 200 });
-  const updated = await changeStatus(order, status, req.user, reason);
+  if (status === 'completed' && req.user.role === 'kitchen') throw forbidden('Only managers and cashiers can record payment.');
+  const updated = await changeStatus(order, status, req.user, reason, req.body?.paymentMethod || null);
   res.json({ order: updated });
 });
 
@@ -54,7 +55,7 @@ r.patch('/:id/payment', requireRole('owner', 'manager', 'cashier'), async (req, 
   const order = await getOrderOr404(req.params.id);
   assertBranchAccess(req, order.branchId);
   const paymentStatus = req.body?.paymentStatus === 'paid' ? 'paid' : 'unpaid';
-  const method = ['cash', 'transfer', 'pos'].includes(req.body?.method) ? req.body.method : null;
+  const method = PAYMENT_METHODS.includes(req.body?.method) ? req.body.method : null;
   if (paymentStatus === 'paid' && !method) throw bad('Choose how the customer paid: cash, transfer or POS.');
   const updated = await col('orders').updateOne(
     { _id: order._id },

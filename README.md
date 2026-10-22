@@ -3,7 +3,7 @@
 The back office for Teecas Amala Express Bukka's three branches, and the API the Teecas ordering app talks to.
 
 - **Today**: sales, orders in progress, each branch at a glance, low stock.
-- **Orders**: a live board (new → accepted → preparing → ready → out for delivery → completed) with a sound and pop-up when an app order arrives, a large-type kitchen view, history and search. Every order is pay on delivery; staff record cash, transfer or POS when it's collected.
+- **Orders**: a live board in four columns: Incoming order → Accepted order → Out for delivery → Order delivered & paid. Each column has a `?` that explains it. A sound and pop-up announce new app orders. Every order is pay on delivery: marking an order delivered & paid asks how the customer paid (cash, transfer or POS). Pickup orders skip Out for delivery. History and search are on the second tab. (A large-type kitchen view is built but switched off; see the comment at the top of `web/src/pages/Orders.jsx`.)
 - **Menu**: dishes, prices, categories, and a per-branch "sold out" switch that the app picks up straight away.
 - **Inventory**: stock per branch, reorder levels, stock in, usage, waste, counts, and a log of every change.
 - **Sales analytics**: sales by day, branch, dish and hour, compared with the period before, with CSV export.
@@ -15,7 +15,7 @@ The back office for Teecas Amala Express Bukka's three branches, and the API the
 | Owner | Everything, every branch |
 | Branch manager | Orders, menu availability, stock and sales for their branch; can pause app orders there |
 | Cashier | Orders, payments and stock for their branch |
-| Kitchen | The order board only; moves orders to preparing and ready |
+| Kitchen | The order board, read-only (for the kitchen view when it's switched back on) |
 
 ## Run it locally
 
@@ -51,9 +51,9 @@ For the client showcase, leave `SEED_DEMO` on so the dashboard opens with sample
 ## How orders reach the restaurant
 
 1. The customer places an order in the app. The API checks each dish is available at that branch, prices it from the menu (never from the phone), and saves it as pay on delivery.
-2. The order appears on the admin board instantly, with a sound.
+2. The order appears in Incoming on the admin board instantly, with a sound.
 3. The app opens WhatsApp with the order pre-written to that branch's WhatsApp number, the same way teecas.online does today, so the branch gets it on WhatsApp too.
-4. As staff move the order along, the customer's app updates.
+4. Staff accept it, send it out for delivery, then mark it delivered & paid with the payment method. The customer's app updates at each step.
 
 To have the server message the branch directly as well (without relying on the customer tapping Send), set the WhatsApp Cloud API variables in `.env.example`.
 

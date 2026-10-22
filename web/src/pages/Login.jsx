@@ -40,7 +40,7 @@ export default function Login({ onSignedIn }) {
     <div className="login">
       <form className="card" onSubmit={submit} noValidate>
         <div className="brand">
-          TEECAS <span>ADMIN</span>
+          Teecas <span>Admin</span>
           <small>Amala Express Bukka</small>
         </div>
         <p className="dim" style={{ textAlign: 'center' }}>

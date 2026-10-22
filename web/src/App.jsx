@@ -181,7 +181,7 @@ export default function App() {
       <div className="shell">
         <aside className={`side ${navOpen ? 'open' : ''}`}>
           <div className="brand">
-            TEECAS <span>ADMIN</span>
+            Teecas <span>Admin</span>
             <small>Amala Express Bukka</small>
           </div>
           <nav className="nav" aria-label="Main">

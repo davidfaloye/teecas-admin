@@ -42,28 +42,32 @@ export function addDays(key, n) {
 }
 
 export const STATUS_LABEL = {
-  placed: 'New',
+  placed: 'Incoming',
   accepted: 'Accepted',
-  preparing: 'Preparing',
-  ready: 'Ready',
+  preparing: 'Accepted',
+  ready: 'Accepted',
   out_for_delivery: 'Out for delivery',
-  completed: 'Completed',
+  completed: 'Delivered & paid',
   cancelled: 'Cancelled',
 };
 
-// The main button on each order card.
-export const NEXT_ACTION = {
-  placed: { to: 'accepted', label: 'Accept' },
-  accepted: { to: 'preparing', label: 'Start cooking' },
-  preparing: { to: 'ready', label: 'Mark ready' },
-  ready: (o) => (o.fulfilment === 'delivery' ? { to: 'out_for_delivery', label: 'Send out' } : { to: 'completed', label: 'Picked up' }),
-  out_for_delivery: { to: 'completed', label: 'Delivered' },
-};
+// The main button on each order card. `pay: true` means the button records payment too.
+export function nextAction(o) {
+  if (o.status === 'placed') return { to: 'accepted', label: 'Accept order' };
+  if (['accepted', 'preparing', 'ready'].includes(o.status)) {
+    return o.fulfilment === 'delivery'
+      ? { to: 'out_for_delivery', label: 'Send out for delivery' }
+      : { to: 'completed', label: 'Collected & paid', pay: o.paymentStatus !== 'paid' };
+  }
+  if (o.status === 'out_for_delivery') return { to: 'completed', label: 'Delivered & paid', pay: o.paymentStatus !== 'paid' };
+  return null;
+}
 
-export const nextAction = (o) => {
-  const a = NEXT_ACTION[o.status];
-  return typeof a === 'function' ? a(o) : a || null;
-};
+export const PAY_METHODS = [
+  ['cash', 'Cash'],
+  ['transfer', 'Transfer'],
+  ['pos', 'POS'],
+];
 
 export const ROLE_LABEL = { owner: 'Owner', manager: 'Branch manager', cashier: 'Cashier', kitchen: 'Kitchen' };
 

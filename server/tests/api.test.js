@@ -86,7 +86,7 @@ test('sold-out items and paused branches are refused', async () => {
   await call('PATCH', `/api/branches/${uniben.id}`, { token: manager, body: { acceptingOrders: true } });
 });
 
-test('staff only see and change their own branch; kitchen only cooks', async () => {
+test('staff only see and change their own branch; kitchen only cooks; delivered means paid', async () => {
   const owner = await login('owner@teecas.online');
   const kitchen = await login('kitchen.ogba@teecas.online');
   const uniben = await login('uniben@teecas.online');
@@ -98,7 +98,14 @@ test('staff only see and change their own branch; kitchen only cooks', async () 
   assert.equal((await call('PATCH', `/api/orders/${order._id}/status`, { token: kitchen, body: { status: 'accepted' } })).status, 403);
   assert.equal((await call('PATCH', `/api/orders/${order._id}/status`, { token: owner, body: { status: 'accepted' } })).data.order.status, 'accepted');
   assert.equal((await call('PATCH', `/api/orders/${order._id}/status`, { token: kitchen, body: { status: 'preparing' } })).data.order.status, 'preparing');
-  assert.equal((await call('PATCH', `/api/orders/${order._id}/status`, { token: owner, body: { status: 'completed' } })).status, 400);
+  // Delivered & paid needs the payment method, and records it.
+  const noPay = await call('PATCH', `/api/orders/${order._id}/status`, { token: owner, body: { status: 'completed' } });
+  assert.equal(noPay.data.code, 'PAYMENT_REQUIRED');
+  assert.equal((await call('PATCH', `/api/orders/${order._id}/status`, { token: kitchen, body: { status: 'completed', paymentMethod: 'cash' } })).status, 403);
+  const done = await call('PATCH', `/api/orders/${order._id}/status`, { token: owner, body: { status: 'completed', paymentMethod: 'transfer' } });
+  assert.equal(done.data.order.status, 'completed');
+  assert.equal(done.data.order.paymentStatus, 'paid');
+  assert.equal(done.data.order.paidWith, 'transfer');
 
   const list = await call('GET', '/api/orders', { token: uniben });
   assert.ok(list.data.orders.every((o) => o.branchName === 'Uniben'));
@@ -115,4 +122,30 @@ test('stock movements keep the count right and never go negative', async () => {
   assert.equal(counted.data.item.qty, 2);
   const tooMuch = await call('POST', `/api/inventory/${item._id}/movements`, { token: manager, body: { change: 9, reason: 'waste' } });
   assert.equal(tooMuch.status, 400);
+});
+
+test('board flow: incoming -> accepted -> out for delivery -> delivered & paid', async () => {
+  const owner = await login('owner@teecas.online');
+  const { data: b } = await call('GET', '/api/public/branches');
+  const branch = b.branches[0];
+  const { data: m } = await call('GET', `/api/public/menu?branchId=${branch.id}`);
+  const placed = await call('POST', '/api/public/orders', {
+    body: { branchId: branch.id, fulfilment: 'delivery', customer: { name: 'Flow Test', phone: '08031234567', address: '2 Test Street, Benin City' }, items: [{ id: m.items[0].id, qty: 1 }] },
+  });
+  const id = placed.data.order.id;
+  const move = (status, extra = {}) => call('PATCH', `/api/orders/${id}/status`, { token: owner, body: { status, ...extra } });
+  assert.equal((await move('accepted')).data.order.status, 'accepted');
+  assert.equal((await move('out_for_delivery')).data.order.status, 'out_for_delivery');
+  const done = await move('completed', { paymentMethod: 'pos' });
+  assert.equal(done.data.order.paidWith, 'pos');
+
+  // Pickup goes straight from accepted to delivered & paid, never out for delivery.
+  const pickup = await call('POST', '/api/public/orders', {
+    body: { branchId: branch.id, fulfilment: 'pickup', customer: { name: 'Pickup Test', phone: '08031234567' }, items: [{ id: m.items[0].id, qty: 1 }] },
+  });
+  const pid = pickup.data.order.id;
+  const pmove = (status, extra = {}) => call('PATCH', `/api/orders/${pid}/status`, { token: owner, body: { status, ...extra } });
+  await pmove('accepted');
+  assert.equal((await pmove('out_for_delivery')).data.code, 'BAD_TRANSITION');
+  assert.equal((await pmove('completed', { paymentMethod: 'cash' })).data.order.status, 'completed');
 });
