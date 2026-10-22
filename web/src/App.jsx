@@ -25,6 +25,7 @@ const PAGES = [
 ];
 
 const SCOPE_KEY = 'teecas_admin_branch';
+const REPEAT_MS = 30000; // repeat the alarm while orders wait in Incoming
 const readHash = () => (window.location.hash.replace(/^#\/?/, '').split('?')[0] || '');
 
 export default function App() {
@@ -46,6 +47,11 @@ export default function App() {
   const [sound, setSound] = useState(true);
   const soundRef = useRef(sound);
   soundRef.current = sound;
+  const lastRing = useRef(0);
+  const ring = useCallback(() => {
+    lastRing.current = Date.now();
+    playAlarm();
+  }, []);
 
   const notify = useCallback((text, kind = '', onClick) => {
     const id = Math.random().toString(36).slice(2);
@@ -120,12 +126,10 @@ export default function App() {
       window.dispatchEvent(new CustomEvent(`teecas:${type}`, { detail: order }));
       refreshNewCount();
       if (type === 'order.created') {
-        if (soundRef.current) playAlarm();
-        notify(`New order #${order.number} · ${order.branchName} · ${order.customer.name}`, 'new', () => {
+        if (soundRef.current) ring();
+        notify(`New order #${order.number} · ${order.branchName || 'No branch yet'} · ${order.customer.name}`, 'new', () => {
           window.location.hash = '#/orders';
         });
-        document.title = `(${'●'}) New order · Teecas Admin`;
-        setTimeout(() => (document.title = 'Teecas Admin'), 8000);
       }
     };
     es.addEventListener('order.created', fwd('order.created'));
@@ -135,6 +139,23 @@ export default function App() {
       setLive(false);
     };
   }, [user, notify, refreshNewCount]);
+
+  // Keep ringing every 30 seconds while any order is waiting in Incoming, until someone accepts
+  // (or cancels) it. Checked every few seconds so it stops as soon as the last one is taken.
+  const waitingRef = useRef(0);
+  waitingRef.current = newCount;
+  useEffect(() => {
+    if (!user || user.role === 'kitchen') return;
+    const t = setInterval(() => {
+      if (soundRef.current && waitingRef.current > 0 && Date.now() - lastRing.current >= REPEAT_MS) ring();
+    }, 3000);
+    return () => clearInterval(t);
+  }, [user, ring]);
+
+  // The browser tab shows how many orders are waiting, so it's visible from another tab too.
+  useEffect(() => {
+    document.title = user && newCount > 0 ? `(${newCount}) Waiting · Teecas Admin` : 'Teecas Admin';
+  }, [user, newCount]);
 
   const allowed = useMemo(() => (user ? PAGES.filter((p) => p.roles.includes(user.role)) : []), [user]);
   const current = allowed.find((p) => p.id === page) || allowed[0];
@@ -207,7 +228,7 @@ export default function App() {
                 className="btn sm ghost"
                 onClick={() => {
                   // Turning the sound on plays the alarm once so staff know what to listen for.
-                  if (!sound) playAlarm();
+                  if (!sound) ring();
                   setSound((v) => !v);
                 }}
                 aria-pressed={sound}
