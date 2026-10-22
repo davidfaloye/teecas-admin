@@ -68,6 +68,25 @@ No sign-in needed; all under `/api/public`.
 | `GET /menu` | Categories and dishes; `?branchId=` gives availability at one branch |
 | `POST /orders` | Place an order: `{ customer: { name, phone, address }, items: [{ id, qty }], note }`. Optional `branchId` (and then `fulfilment: 'pickup'`) to send it straight to one branch |
 | `GET /orders/:id?token=` | Order status for tracking (token is returned when the order is placed) |
+| `PUT /orders/:id/push?token=` | Turn status notifications for an order on (`{ pushToken }`) or off (`{ pushToken: null }`) |
+
+### Customer accounts
+
+Customers can order as guests, or sign up with their phone number and a password so their orders follow them to any phone. Accounts are separate from staff sign-ins: they live in the `customers` collection and their tokens can't open the admin. All under `/api/public/account`; send the token as `Authorization: Bearer <token>`.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /signup` | `{ name, phone, password, address?, claim? }`. Password at least 6 characters. Returns `{ token, customer, claimed }`; 409 `PHONE_TAKEN` if the number already has an account |
+| `POST /signin` | `{ phone, password, claim? }`. Returns `{ token, customer, claimed }` |
+| `GET /me`, `PUT /me` | The account's name, phone and saved address; `PUT` changes name or address |
+| `POST /password` | `{ current, next }` |
+| `DELETE /me` | Deletes the account. Its orders stay in the restaurant's records, unlinked |
+| `GET /orders` | The account's orders, newest first, with tracking tokens. `?limit=` (max 50) and `?before=<createdAt>` to page |
+| `POST /claim` | `{ orders: [{ id, token }] }`: moves guest orders placed on this phone into the account |
+
+`claim` on sign-up and sign-in does the same as `POST /claim`. An order can only be claimed with its tracking token and only if no account has it yet. `POST /orders` with a customer token saves the order to that account and remembers the delivery address.
+
+There's no "forgot password" yet: that needs a code sent by SMS or WhatsApp, and no provider is set up. Until then a customer who forgets their password has no way back into that account, so this is the next thing to add.
 
 ## Code layout
 

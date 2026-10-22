@@ -8,6 +8,7 @@ import { HttpError } from './lib.js';
 import { dbMode } from './db.js';
 import { cloudApiEnabled } from './whatsapp.js';
 import publicRoutes from './routes/public.js';
+import accountRoutes from './routes/account.js';
 import authRoutes from './routes/auth.js';
 import orderRoutes from './routes/orders.js';
 import menuRoutes from './routes/menu.js';
@@ -34,6 +35,7 @@ export function createApp() {
     }),
   );
 
+  app.use('/api/public/account', accountRoutes); // app customers' accounts
   app.use('/api/public', publicRoutes);
   app.use('/api/auth', authRoutes);
 

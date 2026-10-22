@@ -37,6 +37,7 @@ async function userFromToken(token) {
   } catch {
     return null;
   }
+  if (payload.typ === 'customer') return null; // an app customer is never staff
   const user = await col('users').findOne({ _id: payload.sub });
   if (!user || user.disabled) return null;
   return publicUser(user);
@@ -83,4 +84,53 @@ export function orderBranchFilter(req, requested = req.query.branchId) {
 export function assertOrderAccess(req, order) {
   if (!order.branchId) return;
   assertBranchAccess(req, order.branchId);
+}
+
+// ---------------------------------------------------------------------------
+// Customer accounts (the ordering app). Kept apart from staff: a different collection and a
+// `typ: 'customer'` claim, so a customer token can never open the admin and a staff token is
+// never taken as a customer.
+
+const CUSTOMER_TOKEN_TTL = '180d'; // customers stay signed in on their phone
+
+export function signCustomerToken(customer) {
+  return jwt.sign({ sub: customer._id, typ: 'customer' }, secret, { expiresIn: CUSTOMER_TOKEN_TTL });
+}
+
+export function publicCustomer(c) {
+  if (!c) return null;
+  return { id: c._id, name: c.name || '', phone: c.phone || '', address: c.address || '', createdAt: c.createdAt };
+}
+
+function bearer(req) {
+  const header = req.get('authorization') || '';
+  return header.startsWith('Bearer ') ? header.slice(7) : '';
+}
+
+async function customerFromToken(token) {
+  if (!token) return null;
+  let payload;
+  try {
+    payload = jwt.verify(token, secret);
+  } catch {
+    return null;
+  }
+  if (payload.typ !== 'customer') return null;
+  const customer = await col('customers').findOne({ _id: payload.sub });
+  if (!customer || customer.disabled) return null;
+  return customer;
+}
+
+export async function requireCustomer(req, res, next) {
+  const customer = await customerFromToken(bearer(req));
+  if (!customer) return next(new HttpError(401, 'Please sign in again.', 'UNAUTHENTICATED'));
+  req.customer = customer;
+  next();
+}
+
+// For endpoints that work for guests too (placing an order): attaches the customer when the
+// token is good, and carries on as a guest when it isn't.
+export async function optionalCustomer(req, res, next) {
+  req.customer = await customerFromToken(bearer(req));
+  next();
 }

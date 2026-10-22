@@ -15,10 +15,16 @@ const { seed } = await import('../seed.js');
 
 let server;
 let base;
-const call = async (method, url, { body, token } = {}) => {
+// ip: pretend to be a different phone (the server trusts one proxy hop, as on Render), so a test
+// isn't caught by rate limits that earlier tests used up.
+const call = async (method, url, { body, token, ip } = {}) => {
   const r = await fetch(base + url, {
     method,
-    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(ip ? { 'x-forwarded-for': ip } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   return { status: r.status, data: await r.json() };
@@ -256,4 +262,86 @@ test('only the owner can delete an order, and it is gone everywhere', async () =
   assert.equal((await call('GET', `/api/orders/${id}`, { token: owner })).status, 404);
   assert.equal((await call('GET', `/api/public/orders/${id}?token=${t}`)).status, 404);
   assert.equal((await call('DELETE', `/api/orders/${id}`, { token: owner })).status, 404);
+});
+
+test('customer accounts: sign up, order, see orders from the database, claim guest orders', async () => {
+  const { data: m } = await call('GET', '/api/public/menu');
+  const amala = m.items.find((i) => i.name === 'Amala');
+  const details = { name: 'Ada Customer', phone: '08051112222', address: '5 Account Road, Benin City' };
+
+  // A guest order placed on this phone before signing up.
+  const guest = await call('POST', '/api/public/orders', { ip: '10.0.0.7', body: { customer: details, items: [{ id: amala.id, qty: 1 }] } });
+  assert.equal(guest.status, 201);
+
+  // Sign-up checks.
+  assert.equal((await call('POST', '/api/public/account/signup', { body: { ...details, password: '123' } })).data.code, 'WEAK_PASSWORD');
+  const up = await call('POST', '/api/public/account/signup', {
+    body: {
+      ...details,
+      password: 'amala-lover',
+      claim: [
+        { id: guest.data.order.id, token: guest.data.order.trackingToken },
+        { id: guest.data.order.id, token: 'wrong' },
+      ],
+    },
+  });
+  assert.equal(up.status, 201);
+  assert.equal(up.data.claimed, 1);
+  assert.equal(up.data.customer.phone, '2348051112222');
+  assert.equal(up.data.customer.passwordHash, undefined);
+  const token = up.data.token;
+
+  // Same number again (written differently) is refused.
+  const again = await call('POST', '/api/public/account/signup', { body: { ...details, phone: '+234 805 111 2222', password: 'another-one' } });
+  assert.equal(again.status, 409);
+  assert.equal(again.data.code, 'PHONE_TAKEN');
+
+  // Signed-in order is saved to the account and updates the saved address.
+  const placed = await call('POST', '/api/public/orders', {
+    token,
+    ip: '10.0.0.7',
+    body: { customer: { ...details, address: '9 New Street, Benin City' }, items: [{ id: amala.id, qty: 2 }] },
+  });
+  assert.equal(placed.status, 201);
+
+  const mine = await call('GET', '/api/public/account/orders', { token });
+  assert.equal(mine.status, 200);
+  assert.equal(mine.data.orders.length, 2);
+  assert.equal(mine.data.orders[0].id, placed.data.order.id); // newest first
+  assert.ok(mine.data.orders[0].trackingToken);
+  assert.equal((await call('GET', '/api/public/account/me', { token })).data.customer.address, '9 New Street, Benin City');
+
+  // Paging.
+  const page1 = await call('GET', '/api/public/account/orders?limit=1', { token });
+  assert.equal(page1.data.orders.length, 1);
+  assert.equal(page1.data.more, true);
+  const page2 = await call('GET', `/api/public/account/orders?limit=1&before=${encodeURIComponent(page1.data.orders[0].createdAt)}`, { token });
+  assert.equal(page2.data.orders[0].id, guest.data.order.id);
+
+  // Sign in from another phone.
+  assert.equal((await call('POST', '/api/public/account/signin', { body: { phone: '08051112222', password: 'nope-nope' } })).status, 401);
+  const inAgain = await call('POST', '/api/public/account/signin', { body: { phone: '0805 111 2222', password: 'amala-lover' } });
+  assert.equal(inAgain.status, 200);
+  assert.equal((await call('GET', '/api/public/account/orders', { token: inAgain.data.token })).data.orders.length, 2);
+
+  // A customer token never opens the admin, and no token means no account data.
+  assert.equal((await call('GET', '/api/orders', { token })).status, 401);
+  assert.equal((await call('GET', '/api/public/account/orders')).status, 401);
+  // A staff token is not a customer.
+  const owner = await login('owner@teecas.online');
+  assert.equal((await call('GET', '/api/public/account/me', { token: owner })).status, 401);
+
+  // Another account can't take these orders.
+  const other = await call('POST', '/api/public/account/signup', { body: { name: 'Bo', phone: '08059998888', password: 'bo-password' } });
+  const stolen = await call('POST', '/api/public/account/claim', {
+    token: other.data.token,
+    body: { orders: [{ id: placed.data.order.id, token: placed.data.order.trackingToken }] },
+  });
+  assert.equal(stolen.data.claimed, 0);
+
+  // Deleting the account keeps the orders for the restaurant but unlinks them.
+  assert.equal((await call('DELETE', '/api/public/account/me', { token })).status, 200);
+  assert.equal((await call('GET', '/api/public/account/orders', { token })).status, 401);
+  const still = await call('GET', `/api/public/orders/${placed.data.order.id}?token=${placed.data.order.trackingToken}`);
+  assert.equal(still.status, 200);
 });

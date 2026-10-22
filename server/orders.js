@@ -20,7 +20,9 @@ export function isItemAvailable(item, branchId) {
 // and every branch can see them; whoever accepts one picks the branch that will cook and deliver
 // it, based on distance and what that branch has in stock. A branchId can still be sent (e.g. by
 // a branch-specific page) and is then used as before.
-export async function createOrder(input, { channel = 'app' } = {}) {
+// customerId links the order to a signed-in app account, so it shows in their order history on
+// any phone. Guests (no account) still order exactly as before.
+export async function createOrder(input, { channel = 'app', customerId = null } = {}) {
   let branch = null;
   if (input.branchId) {
     const branchId = str(input.branchId, { field: 'Branch', max: 64 });
@@ -82,6 +84,7 @@ export async function createOrder(input, { channel = 'app' } = {}) {
     branchId,
     branchName: branch?.name || '',
     channel,
+    customerId,
     customer,
     fulfilment,
     items,

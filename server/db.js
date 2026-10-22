@@ -24,6 +24,7 @@ export const COLLECTIONS = [
   'stockMovements',
   'orders',
   'users',
+  'customers',
   'counters',
 ];
 
@@ -78,6 +79,8 @@ async function ensureIndexes() {
   await mongoDb.collection('orders').createIndex({ branchId: 1, createdAt: -1 });
   await mongoDb.collection('orders').createIndex({ status: 1 });
   await mongoDb.collection('orders').createIndex({ number: 1 }, { unique: true });
+  await mongoDb.collection('orders').createIndex({ customerId: 1, createdAt: -1 });
+  await mongoDb.collection('customers').createIndex({ phone: 1 }, { unique: true });
   await mongoDb.collection('inventory').createIndex({ branchId: 1, name: 1 });
   await mongoDb.collection('stockMovements').createIndex({ inventoryId: 1, createdAt: -1 });
 }

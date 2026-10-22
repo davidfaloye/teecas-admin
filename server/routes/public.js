@@ -1,4 +1,5 @@
-// Endpoints the customer ordering app uses. No sign-in.
+// Endpoints the customer ordering app uses. No sign-in needed; a signed-in customer's token is
+// used when present so their orders are saved to their account (see routes/account.js).
 
 import { Router } from 'express';
 import cors from 'cors';
@@ -6,6 +7,7 @@ import { col } from '../db.js';
 import { createOrder, isItemAvailable, isItemOnMenu, publicOrder, getOrderOr404, orderWhatsapp } from '../orders.js';
 import { rateLimit, notFound } from '../lib.js';
 import { cleanPushToken } from '../push.js';
+import { optionalCustomer } from '../auth.js';
 
 const r = Router();
 r.use(cors());
@@ -62,8 +64,12 @@ r.get('/menu', async (req, res) => {
 
 const orderLimiter = rateLimit({ windowMs: 60_000, max: 8, message: 'Too many orders from this device. Wait a minute and try again.' });
 
-r.post('/orders', orderLimiter, async (req, res) => {
-  const { order, whatsapp } = await createOrder(req.body || {});
+r.post('/orders', orderLimiter, optionalCustomer, async (req, res) => {
+  const { order, whatsapp } = await createOrder(req.body || {}, { customerId: req.customer?._id || null });
+  // Remember the latest delivery address on the account so the next checkout is pre-filled.
+  if (req.customer && order.customer.address && order.customer.address !== req.customer.address) {
+    await col('customers').updateOne({ _id: req.customer._id }, { $set: { address: order.customer.address } });
+  }
   res.status(201).json({ order: { ...publicOrder(order), trackingToken: order.trackingToken }, whatsapp });
 });
 
