@@ -8,6 +8,7 @@ import path from 'node:path';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'teecas-test-'));
 process.env.DATA_FILE = path.join(dir, 'db.json');
 delete process.env.MONGODB_URI;
+process.env.EMAIL_TRANSPORT = 'memory';
 
 const { connect, disconnect } = await import('../db.js');
 const { createApp } = await import('../app.js');
@@ -268,16 +269,18 @@ test('customer accounts: sign up, order, see orders from the database, claim gue
   const { data: m } = await call('GET', '/api/public/menu');
   const amala = m.items.find((i) => i.name === 'Amala');
   const details = { name: 'Ada Customer', phone: '08051112222', address: '5 Account Road, Benin City' };
+  const signupBase = { ...details, email: 'Ada@Example.com' };
 
   // A guest order placed on this phone before signing up.
   const guest = await call('POST', '/api/public/orders', { ip: '10.0.0.7', body: { customer: details, items: [{ id: amala.id, qty: 1 }] } });
   assert.equal(guest.status, 201);
 
   // Sign-up checks.
-  assert.equal((await call('POST', '/api/public/account/signup', { body: { ...details, password: '123' } })).data.code, 'WEAK_PASSWORD');
+  assert.equal((await call('POST', '/api/public/account/signup', { body: { ...signupBase, password: '123' } })).data.code, 'WEAK_PASSWORD');
+  assert.equal((await call('POST', '/api/public/account/signup', { body: { ...details, password: 'amala-lover' } })).status, 400); // email needed
   const up = await call('POST', '/api/public/account/signup', {
     body: {
-      ...details,
+      ...signupBase,
       password: 'amala-lover',
       claim: [
         { id: guest.data.order.id, token: guest.data.order.trackingToken },
@@ -289,12 +292,15 @@ test('customer accounts: sign up, order, see orders from the database, claim gue
   assert.equal(up.data.claimed, 1);
   assert.equal(up.data.customer.phone, '2348051112222');
   assert.equal(up.data.customer.passwordHash, undefined);
+  assert.equal(up.data.customer.email, 'ada@example.com');
   const token = up.data.token;
 
   // Same number again (written differently) is refused.
-  const again = await call('POST', '/api/public/account/signup', { body: { ...details, phone: '+234 805 111 2222', password: 'another-one' } });
+  const again = await call('POST', '/api/public/account/signup', { body: { ...signupBase, email: 'other@example.com', phone: '+234 805 111 2222', password: 'another-one' } });
   assert.equal(again.status, 409);
   assert.equal(again.data.code, 'PHONE_TAKEN');
+  const sameEmail = await call('POST', '/api/public/account/signup', { body: { ...signupBase, phone: '08050000001', password: 'another-one' } });
+  assert.equal(sameEmail.data.code, 'EMAIL_TAKEN');
 
   // Signed-in order is saved to the account and updates the saved address.
   const placed = await call('POST', '/api/public/orders', {
@@ -332,7 +338,7 @@ test('customer accounts: sign up, order, see orders from the database, claim gue
   assert.equal((await call('GET', '/api/public/account/me', { token: owner })).status, 401);
 
   // Another account can't take these orders.
-  const other = await call('POST', '/api/public/account/signup', { body: { name: 'Bo', phone: '08059998888', password: 'bo-password' } });
+  const other = await call('POST', '/api/public/account/signup', { body: { name: 'Bo', phone: '08059998888', email: 'bo@example.com', password: 'bo-password' } });
   const stolen = await call('POST', '/api/public/account/claim', {
     token: other.data.token,
     body: { orders: [{ id: placed.data.order.id, token: placed.data.order.trackingToken }] },
@@ -344,4 +350,61 @@ test('customer accounts: sign up, order, see orders from the database, claim gue
   assert.equal((await call('GET', '/api/public/account/orders', { token })).status, 401);
   const still = await call('GET', `/api/public/orders/${placed.data.order.id}?token=${placed.data.order.trackingToken}`);
   assert.equal(still.status, 200);
+});
+
+test('forgot password: a code is emailed, wrong codes are limited, the reset signs other phones out', async () => {
+  const { outbox } = await import('../email.js');
+  const signup = await call('POST', '/api/public/account/signup', {
+    ip: '10.0.0.8',
+    body: { name: 'Chi Reset', phone: '08061234567', email: 'chi@example.com', password: 'old-password' },
+  });
+  assert.equal(signup.status, 201);
+  const oldToken = signup.data.token;
+
+  // Unknown accounts get the same answer, and no email.
+  outbox.length = 0;
+  const unknown = await call('POST', '/api/public/account/forgot', { ip: '10.0.0.8', body: { login: 'nobody@example.com' } });
+  assert.equal(unknown.status, 200);
+  assert.equal(outbox.length, 0);
+
+  // By phone number: the code goes to the account's email.
+  const asked = await call('POST', '/api/public/account/forgot', { ip: '10.0.0.8', body: { login: '0806 123 4567' } });
+  assert.equal(asked.status, 200);
+  assert.equal(outbox.length, 1);
+  assert.equal(outbox[0].to, 'chi@example.com');
+  const code = outbox[0].text.match(/code is: (\d{6})/)[1];
+
+  // Asking again straight away doesn't send another email (or replace the code).
+  await call('POST', '/api/public/account/forgot', { ip: '10.0.0.8', body: { login: 'CHI@example.com' } });
+  assert.equal(outbox.length, 1);
+
+  const wrongCode = code === '000000' ? '111111' : '000000';
+  const bad = await call('POST', '/api/public/account/reset', { ip: '10.0.0.9', body: { login: 'chi@example.com', code: wrongCode, password: 'new-password' } });
+  assert.equal(bad.data.code, 'BAD_CODE');
+
+  const ok = await call('POST', '/api/public/account/reset', { ip: '10.0.0.9', body: { login: 'chi@example.com', code, password: 'new-password' } });
+  assert.equal(ok.status, 200);
+  assert.ok(ok.data.token);
+
+  // The code works once; the old password and the old phone's sign-in no longer do.
+  const reused = await call('POST', '/api/public/account/reset', { ip: '10.0.0.9', body: { login: 'chi@example.com', code, password: 'third-password' } });
+  assert.equal(reused.data.code, 'BAD_CODE');
+  assert.equal((await call('GET', '/api/public/account/me', { token: oldToken })).status, 401);
+  assert.equal((await call('GET', '/api/public/account/me', { token: ok.data.token })).status, 200);
+  assert.equal((await call('POST', '/api/public/account/signin', { ip: '10.0.0.9', body: { phone: '08061234567', password: 'old-password' } })).status, 401);
+  assert.equal((await call('POST', '/api/public/account/signin', { ip: '10.0.0.9', body: { phone: '08061234567', password: 'new-password' } })).status, 200);
+
+  // Five wrong codes and even the right one stops working.
+  outbox.length = 0;
+  const { col } = await import('../db.js');
+  const chi = await col('customers').findOne({ email: 'chi@example.com' });
+  await col('customers').updateOne({ _id: chi._id }, { $unset: { resetSentAt: '' } });
+  await call('POST', '/api/public/account/forgot', { ip: '10.0.0.10', body: { login: 'chi@example.com' } });
+  const code2 = outbox[0].text.match(/code is: (\d{6})/)[1];
+  const wrong2 = code2 === '000000' ? '111111' : '000000';
+  for (let i = 0; i < 5; i++) {
+    await call('POST', '/api/public/account/reset', { ip: `10.0.1.${i}`, body: { login: 'chi@example.com', code: wrong2, password: 'x-password' } });
+  }
+  const locked = await call('POST', '/api/public/account/reset', { ip: '10.0.2.1', body: { login: 'chi@example.com', code: code2, password: 'x-password' } });
+  assert.equal(locked.data.code, 'BAD_CODE');
 });

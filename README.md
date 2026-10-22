@@ -72,21 +72,23 @@ No sign-in needed; all under `/api/public`.
 
 ### Customer accounts
 
-Customers can order as guests, or sign up with their phone number and a password so their orders follow them to any phone. Accounts are separate from staff sign-ins: they live in the `customers` collection and their tokens can't open the admin. All under `/api/public/account`; send the token as `Authorization: Bearer <token>`.
+Customers can order as guests, or sign up with their name, phone number, email and a password so their orders follow them to any phone. They sign in with their phone number; the email is for resetting a forgotten password. Accounts are separate from staff sign-ins: they live in the `customers` collection and their tokens can't open the admin. All under `/api/public/account`; send the token as `Authorization: Bearer <token>`.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /signup` | `{ name, phone, password, address?, claim? }`. Password at least 6 characters. Returns `{ token, customer, claimed }`; 409 `PHONE_TAKEN` if the number already has an account |
+| `POST /signup` | `{ name, phone, email, password, address?, claim? }`. Password at least 6 characters. Returns `{ token, customer, claimed }`; 409 `PHONE_TAKEN` or `EMAIL_TAKEN` if another account has it |
 | `POST /signin` | `{ phone, password, claim? }`. Returns `{ token, customer, claimed }` |
-| `GET /me`, `PUT /me` | The account's name, phone and saved address; `PUT` changes name or address |
-| `POST /password` | `{ current, next }` |
+| `GET /me`, `PUT /me` | The account's name, phone, email and saved address; `PUT` changes name, email or address |
+| `POST /password` | `{ current, next }`. Signs out the account's other phones and returns a new `token` |
+| `POST /forgot` | `{ login }` (phone number or email). Emails a 6-digit code, valid 15 minutes. Always answers `{ ok: true }`, so it doesn't reveal whether an account exists; asking again within a minute doesn't send another |
+| `POST /reset` | `{ login, code, password, claim? }`. Sets the new password and signs in (`{ token, customer, claimed }`). Five wrong codes and the code stops working; ask for a new one. Other phones are signed out |
 | `DELETE /me` | Deletes the account. Its orders stay in the restaurant's records, unlinked |
 | `GET /orders` | The account's orders, newest first, with tracking tokens. `?limit=` (max 50) and `?before=<createdAt>` to page |
 | `POST /claim` | `{ orders: [{ id, token }] }`: moves guest orders placed on this phone into the account |
 
 `claim` on sign-up and sign-in does the same as `POST /claim`. An order can only be claimed with its tracking token and only if no account has it yet. `POST /orders` with a customer token saves the order to that account and remembers the delivery address.
 
-There's no "forgot password" yet: that needs a code sent by SMS or WhatsApp, and no provider is set up. Until then a customer who forgets their password has no way back into that account, so this is the next thing to add.
+Password reset emails need SMTP settings (see `.env.example`). On Render, add `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` and `MAIL_FROM` under Environment. Without them the reset code is only written to the server log and the customer never receives it.
 
 ## Code layout
 

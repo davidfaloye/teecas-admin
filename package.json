@@ -15,6 +15,7 @@
     "test": "node --test server/tests/*.test.js"
   },
   "dependencies": {
+    "@vitejs/plugin-react": "^6.1.2",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^18.0.8",
@@ -22,10 +23,10 @@
     "jsonwebtoken": "^9.0.3",
     "mingo": "^7.2.5",
     "mongodb": "^7.7.0",
-    "vite": "^8.3.4",
-    "@vitejs/plugin-react": "^6.1.2",
+    "nodemailer": "^10.2.1",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "vite": "^8.3.4"
   },
   "devDependencies": {
     "concurrently": "^10.0.6"

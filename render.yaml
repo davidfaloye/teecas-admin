@@ -27,3 +27,14 @@ services:
         value: "false"
       - key: RESTAURANT_TIMEZONE
         value: Africa/Lagos
+      # Email for app customers' password reset codes (any SMTP provider).
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM
+        sync: false # e.g. Teecas <no-reply@teecas.online>

@@ -7,6 +7,7 @@ import { subscribe } from './events.js';
 import { HttpError } from './lib.js';
 import { dbMode } from './db.js';
 import { cloudApiEnabled } from './whatsapp.js';
+import { emailEnabled } from './email.js';
 import publicRoutes from './routes/public.js';
 import accountRoutes from './routes/account.js';
 import authRoutes from './routes/auth.js';
@@ -30,6 +31,7 @@ export function createApp() {
       ok: true,
       db: dbMode(),
       whatsappCloudApi: cloudApiEnabled(),
+      email: emailEnabled(), // password reset codes can be sent
       // Show the demo sign-ins on the login page only for demo deployments.
       demoLogins: process.env.SHOW_DEMO_LOGINS ? process.env.SHOW_DEMO_LOGINS === 'true' : dbMode() === 'file',
     }),

@@ -94,12 +94,14 @@ export function assertOrderAccess(req, order) {
 const CUSTOMER_TOKEN_TTL = '180d'; // customers stay signed in on their phone
 
 export function signCustomerToken(customer) {
-  return jwt.sign({ sub: customer._id, typ: 'customer' }, secret, { expiresIn: CUSTOMER_TOKEN_TTL });
+  // pv: the password version. It goes up whenever the password changes, which ends every
+  // sign-in made with an older version.
+  return jwt.sign({ sub: customer._id, typ: 'customer', pv: customer.passwordVersion || 0 }, secret, { expiresIn: CUSTOMER_TOKEN_TTL });
 }
 
 export function publicCustomer(c) {
   if (!c) return null;
-  return { id: c._id, name: c.name || '', phone: c.phone || '', address: c.address || '', createdAt: c.createdAt };
+  return { id: c._id, name: c.name || '', phone: c.phone || '', email: c.email || '', address: c.address || '', createdAt: c.createdAt };
 }
 
 function bearer(req) {
@@ -118,6 +120,8 @@ async function customerFromToken(token) {
   if (payload.typ !== 'customer') return null;
   const customer = await col('customers').findOne({ _id: payload.sub });
   if (!customer || customer.disabled) return null;
+  // Changing or resetting the password signs out every phone signed in before the change.
+  if ((payload.pv || 0) !== (customer.passwordVersion || 0)) return null;
   return customer;
 }
 
