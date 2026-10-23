@@ -20,7 +20,7 @@ export const ORDER_STATUSES = [
 // older orders; they sit in the Accepted column.
 export const NEXT_STATUS = {
   placed: ['accepted', 'cancelled'],
-  accepted: ['out_for_delivery', 'completed', 'preparing', 'cancelled'],
+  accepted: ['out_for_delivery', 'completed', 'preparing', 'ready', 'cancelled'], // ready: pickup orders, straight from the counter
   preparing: ['ready', 'out_for_delivery', 'completed', 'cancelled'],
   ready: ['out_for_delivery', 'completed', 'cancelled'],
   out_for_delivery: ['completed', 'cancelled'],

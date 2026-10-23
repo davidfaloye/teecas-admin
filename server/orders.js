@@ -22,9 +22,17 @@ export function isItemAvailable(item, branchId) {
 // a branch-specific page) and is then used as before.
 // customerId links the order to a signed-in app account, so it shows in their order history on
 // any phone. Guests (no account) still order exactly as before.
+// Delivery orders come in without a branch: every branch sees them and the one that accepts
+// takes them. Pickup orders name the branch the customer will collect from, and only that branch
+// gets them. (A branch sent with a delivery order is ignored: customers choose a branch only for
+// pickup.)
 export async function createOrder(input, { channel = 'app', customerId = null } = {}) {
+  const fulfilment = input.fulfilment === 'pickup' ? 'pickup' : 'delivery';
+  if (fulfilment === 'pickup' && !input.branchId) {
+    throw bad('Choose the branch you’ll pick up from.', 'PICKUP_BRANCH_REQUIRED');
+  }
   let branch = null;
-  if (input.branchId) {
+  if (fulfilment === 'pickup') {
     const branchId = str(input.branchId, { field: 'Branch', max: 64 });
     branch = await col('branches').findOne({ _id: branchId });
     if (!branch || branch.archived) throw bad('That branch was not found.', 'BRANCH_NOT_FOUND');
@@ -34,8 +42,6 @@ export async function createOrder(input, { channel = 'app', customerId = null } 
     if (!open) throw bad("Teecas isn't taking orders right now. Please try again later.", 'BRANCH_CLOSED');
   }
   const branchId = branch?._id || null;
-
-  const fulfilment = branch && input.fulfilment === 'pickup' ? 'pickup' : 'delivery';
   const c = input.customer || {};
   const customer = {
     name: str(c.name, { field: 'Your name', required: true, min: 2, max: 80 }),
@@ -141,7 +147,7 @@ export async function changeStatus(order, nextStatus, user, reason = '', payment
     throw bad(`An order that is ${order.status.replace(/_/g, ' ')} can't move to ${nextStatus.replace(/_/g, ' ')}.`, 'BAD_TRANSITION');
   }
   if (nextStatus === 'out_for_delivery' && order.fulfilment !== 'delivery') {
-    throw bad('Pickup orders are marked delivered & paid when the customer collects them.', 'BAD_TRANSITION');
+    throw bad('Pickup orders are marked ready for pickup, then collected & paid.', 'BAD_TRANSITION');
   }
   if (user.role === 'kitchen' && !KITCHEN_MOVES.has(`${order.status}>${nextStatus}`)) {
     throw forbidden('Kitchen accounts can only move orders to preparing and ready.');

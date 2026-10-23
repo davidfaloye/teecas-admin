@@ -53,17 +53,18 @@ test('customer order: priced on the server, pay on delivery, WhatsApp message to
   const amala = m.items.find((i) => i.name === 'Amala');
   const { status, data } = await call('POST', '/api/public/orders', {
     body: {
-      branchId: branch.id,
+      branchId: branch.id, // ignored: customers choose a branch only for pickup
       fulfilment: 'delivery',
       customer: { name: 'Test Customer', phone: '08031234567', address: '1 Test Street, Benin City' },
       items: [{ id: amala.id, qty: 2, price: 1 }],
     },
   });
   assert.equal(status, 201);
+  assert.equal(data.order.branchId, null);
   assert.equal(data.order.total, amala.price * 2); // delivery fee is settled with the rider
   assert.equal(data.order.deliveryFee, 0);
   assert.equal(data.order.paymentMethod, 'pay_on_delivery');
-  assert.match(data.whatsapp.url, new RegExp(`^https://wa.me/${branch.whatsapp}\\?text=`));
+  assert.match(data.whatsapp.url, /^https:\/\/wa.me\/\d+\?text=/);
   assert.match(data.whatsapp.text, /Amala ~ 2/);
   assert.match(data.whatsapp.text, /delivery fee excluded/);
 
@@ -103,9 +104,11 @@ test('staff only see and change their own branch; kitchen only cooks; delivered 
   const order = data.orders.find((o) => o.customer.name === 'Test Customer');
   assert.ok(order);
 
-  assert.equal((await call('PATCH', `/api/orders/${order._id}/status`, { token: uniben, body: { status: 'accepted' } })).status, 403);
+  // The owner gives this delivery order to Ogba Road; after that Uniben can't touch it.
+  const ogbaId = (await call('GET', '/api/public/branches')).data.branches.find((x) => x.name === 'Ogba Road').id;
   assert.equal((await call('PATCH', `/api/orders/${order._id}/status`, { token: kitchen, body: { status: 'accepted' } })).status, 403);
-  assert.equal((await call('PATCH', `/api/orders/${order._id}/status`, { token: owner, body: { status: 'accepted' } })).data.order.status, 'accepted');
+  assert.equal((await call('PATCH', `/api/orders/${order._id}/status`, { token: owner, body: { status: 'accepted', branchId: ogbaId } })).data.order.status, 'accepted');
+  assert.equal((await call('PATCH', `/api/orders/${order._id}/status`, { token: uniben, body: { status: 'preparing' } })).status, 403);
   assert.equal((await call('PATCH', `/api/orders/${order._id}/status`, { token: kitchen, body: { status: 'preparing' } })).data.order.status, 'preparing');
   // Delivered & paid needs the payment method, and records it.
   const noPay = await call('PATCH', `/api/orders/${order._id}/status`, { token: owner, body: { status: 'completed' } });
@@ -152,24 +155,39 @@ test('board flow: incoming -> accepted -> out for delivery -> delivered & paid',
   const branch = b.branches[0];
   const { data: m } = await call('GET', `/api/public/menu?branchId=${branch.id}`);
   const placed = await call('POST', '/api/public/orders', {
-    body: { branchId: branch.id, fulfilment: 'delivery', customer: { name: 'Flow Test', phone: '08031234567', address: '2 Test Street, Benin City' }, items: [{ id: m.items[0].id, qty: 1 }] },
+    body: { fulfilment: 'delivery', customer: { name: 'Flow Test', phone: '08031234567', address: '2 Test Street, Benin City' }, items: [{ id: m.items[0].id, qty: 1 }] },
   });
   const id = placed.data.order.id;
   const move = (status, extra = {}) => call('PATCH', `/api/orders/${id}/status`, { token: owner, body: { status, ...extra } });
-  assert.equal((await move('accepted')).data.order.status, 'accepted');
+  assert.equal((await move('accepted', { branchId: branch.id })).data.order.status, 'accepted');
   assert.equal((await move('out_for_delivery')).data.order.status, 'out_for_delivery');
   const done = await move('completed', { paymentMethod: 'pos' });
   assert.equal(done.data.order.paidWith, 'pos');
 
-  // Pickup goes straight from accepted to delivered & paid, never out for delivery.
+  // Pickup: only the chosen branch gets it; accepted -> ready for pickup -> collected & paid.
   const pickup = await call('POST', '/api/public/orders', {
     body: { branchId: branch.id, fulfilment: 'pickup', customer: { name: 'Pickup Test', phone: '08031234567' }, items: [{ id: m.items[0].id, qty: 1 }] },
   });
+  assert.equal(pickup.data.order.branchId, branch.id);
+  assert.match(pickup.data.whatsapp.text, new RegExp(`Pickup at ${branch.name}`));
+  assert.match(pickup.data.whatsapp.text, /pay at pickup/);
   const pid = pickup.data.order.id;
+  const { signToken } = await import('../auth.js');
+  const { col } = await import('../db.js');
+  const other = signToken(await col('users').findOne({ email: branch.name === 'Uniben' ? 'ogba@teecas.online' : 'uniben@teecas.online' })); // logins are rate-limited
+  assert.equal((await call('GET', `/api/orders/${pid}`, { token: other })).status, 403); // other branches can't see it
   const pmove = (status, extra = {}) => call('PATCH', `/api/orders/${pid}/status`, { token: owner, body: { status, ...extra } });
   await pmove('accepted');
   assert.equal((await pmove('out_for_delivery')).data.code, 'BAD_TRANSITION');
+  assert.equal((await pmove('ready')).data.order.status, 'ready');
   assert.equal((await pmove('completed', { paymentMethod: 'cash' })).data.order.status, 'completed');
+
+  // A pickup order has to say where. (Checked directly: the public endpoint allows 8 orders a minute.)
+  const { createOrder } = await import('../orders.js');
+  await assert.rejects(
+    createOrder({ fulfilment: 'pickup', customer: { name: 'No Branch', phone: '08031234567' }, items: [{ id: m.items[0].id, qty: 1 }] }),
+    (e) => e.code === 'PICKUP_BRANCH_REQUIRED',
+  );
 });
 
 test('app orders without a branch: every branch sees them, the one that accepts takes them', async () => {
@@ -179,12 +197,12 @@ test('app orders without a branch: every branch sees them, the one that accepts 
   const { data: m } = await call('GET', '/api/public/menu');
   const item = m.items.find((i) => i.available);
   const placed = await call('POST', '/api/public/orders', {
-    body: { fulfilment: 'pickup', customer: { name: 'No Branch', phone: '08031234567', address: '3 Test Street, Benin City' }, items: [{ id: item.id, qty: 3 }] },
+    body: { fulfilment: 'delivery', customer: { name: 'No Branch', phone: '08031234567', address: '3 Test Street, Benin City' }, items: [{ id: item.id, qty: 3 }] },
   });
   assert.equal(placed.status, 201);
   const o = placed.data.order;
   assert.equal(o.branchId, null);
-  assert.equal(o.fulfilment, 'delivery'); // no branch, so no pickup
+  assert.equal(o.fulfilment, 'delivery');
   assert.equal(o.total, item.price * 3);
   assert.match(placed.data.whatsapp.url, /^https:\/\/wa.me\/\d+\?text=/);
   assert.doesNotMatch(placed.data.whatsapp.text, /Branch:/);

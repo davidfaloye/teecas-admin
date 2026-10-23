@@ -86,7 +86,7 @@ export default function Home() {
                       </div>
                     </td>
                     <td>
-                      <StatusBadge status={o.status} />
+                      <StatusBadge status={o.status} fulfilment={o.fulfilment} />
                     </td>
                     <td className="r num">{naira(o.total)}</td>
                   </tr>

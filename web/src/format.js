@@ -51,14 +51,21 @@ export const STATUS_LABEL = {
   cancelled: 'Cancelled',
 };
 
+// Pickup orders read differently at the end: "Ready for pickup", then "Collected & paid".
+const PICKUP_LABEL = { ready: 'Ready for pickup', completed: 'Collected & paid' };
+export const statusLabel = (status, fulfilment) => (fulfilment === 'pickup' && PICKUP_LABEL[status]) || STATUS_LABEL[status] || status;
+
 // The main button on each order card. `pay: true` means the button records payment too.
+// Delivery: Accept → Send out for delivery → Delivered & paid.
+// Pickup:   Accept → Ready for pickup (tells the customer to come) → Collected & paid.
 export function nextAction(o) {
   if (o.status === 'placed') return { to: 'accepted', label: 'Accept order' };
-  if (['accepted', 'preparing', 'ready'].includes(o.status)) {
-    return o.fulfilment === 'delivery'
-      ? { to: 'out_for_delivery', label: 'Send out for delivery' }
-      : { to: 'completed', label: 'Collected & paid', pay: o.paymentStatus !== 'paid' };
+  if (o.fulfilment === 'pickup') {
+    if (['accepted', 'preparing'].includes(o.status)) return { to: 'ready', label: 'Ready for pickup' };
+    if (o.status === 'ready') return { to: 'completed', label: 'Collected & paid', pay: o.paymentStatus !== 'paid' };
+    return null;
   }
+  if (['accepted', 'preparing', 'ready'].includes(o.status)) return { to: 'out_for_delivery', label: 'Send out for delivery' };
   if (o.status === 'out_for_delivery') return { to: 'completed', label: 'Delivered & paid', pay: o.paymentStatus !== 'paid' };
   return null;
 }

@@ -15,9 +15,15 @@ export function cleanPushToken(v) {
 const MESSAGES = {
   accepted: (o) => ['Order accepted', `${o.branchName || 'Teecas'} is preparing order #${o.number}.`],
   preparing: (o) => ['Being prepared', `Order #${o.number} is being prepared.`],
-  ready: (o) => ['Order ready', `Order #${o.number} is ready.`],
+  ready: (o) =>
+    o.fulfilment === 'pickup'
+      ? ['Ready for pickup', `Order #${o.number} is ready. Pick it up at ${o.branchName || 'Teecas'} and pay there.`]
+      : ['Order ready', `Order #${o.number} is ready.`],
   out_for_delivery: (o) => ['On the way', `Order #${o.number} is on its way. Have your payment ready.`],
-  completed: (o) => ['Delivered', `Order #${o.number} has been delivered. Enjoy your meal!`],
+  completed: (o) =>
+    o.fulfilment === 'pickup'
+      ? ['Collected', `Order #${o.number} has been collected. Enjoy your meal!`]
+      : ['Delivered', `Order #${o.number} has been delivered. Enjoy your meal!`],
   cancelled: (o) => ['Order cancelled', `Order #${o.number} was cancelled${o.cancelReason ? `: ${o.cancelReason}` : '.'}`],
 };
 

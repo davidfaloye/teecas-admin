@@ -1,36 +1,38 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useApp, useLoad, useOrderEvents, ErrorBox, Loading, Spinner, StatusBadge, Modal, Icon, Field } from '../ui.jsx';
-import { naira, time, ago, dateTime, nextAction, STATUS_LABEL, PAY_METHODS, todayKey, addDays } from '../format.js';
+import { naira, time, ago, dateTime, nextAction, statusLabel, PAY_METHODS, todayKey, addDays } from '../format.js';
 
-// The four columns of the live board. "preparing" and "ready" (used by the kitchen view and by
-// older orders) sit in Accepted.
+// The four columns of the live board. Delivery orders go Incoming → Accepted → Out for delivery
+// → Delivered & paid. Pickup orders go Incoming → Accepted → Ready for pickup → Collected & paid,
+// so the third column holds both. "preparing" (from the kitchen view) sits in Accepted, as does
+// "ready" for a delivery order waiting for its rider.
 const COLUMNS = [
   {
     id: 'incoming',
     title: 'Incoming order',
-    statuses: ['placed'],
+    match: (o) => o.status === 'placed',
     color: 'var(--accent)',
-    help: 'New orders from the app. Customers don’t choose a branch, so every branch sees these. The branch nearest the customer that has the food takes it by accepting; it then leaves the other branches’ boards. If no branch can fill it, open the order and cancel it with a reason; the customer sees the reason.',
+    help: 'New orders from the app. Delivery orders have no branch yet, so every branch sees them: the branch nearest the customer that has the food takes it by accepting, and it leaves the other boards. Pickup orders go only to the branch the customer chose to collect from. If an order can’t be filled, open it and cancel it with a reason; the customer sees the reason.',
   },
   {
     id: 'accepted',
     title: 'Accepted order',
-    statuses: ['accepted', 'preparing', 'ready'],
+    match: (o) => o.status === 'accepted' || o.status === 'preparing' || (o.status === 'ready' && o.fulfilment !== 'pickup'),
     color: 'var(--warn)',
-    help: 'The branch has confirmed the order and the kitchen is making it. When it’s packed, tap Send out for delivery. Pickup orders skip delivery: tap Collected & paid when the customer picks it up and pays.',
+    help: 'The branch has confirmed the order and the kitchen is making it. Delivery: when it’s packed, tap Send out for delivery. Pickup: when it’s packed, tap Ready for pickup; the customer gets a message to come and collect it.',
   },
   {
     id: 'out',
-    title: 'Out for delivery',
-    statuses: ['out_for_delivery'],
+    title: 'Out for delivery / ready for pickup',
+    match: (o) => o.status === 'out_for_delivery' || (o.status === 'ready' && o.fulfilment === 'pickup'),
     color: 'var(--violet)',
-    help: 'The rider has the food and is on the way. The customer pays on arrival by cash, transfer or POS. When the rider confirms, tap Delivered & paid and choose how they paid.',
+    help: 'Delivery: the rider has the food and is on the way; when the rider confirms, tap Delivered & paid. Pickup: the food is packed at the counter; when the customer collects it, tap Collected & paid. Either way the customer pays by cash, transfer or POS, and you choose which.',
   },
   {
     id: 'done',
-    title: 'Order delivered & paid',
-    statuses: ['completed'],
+    title: 'Delivered / collected & paid',
+    match: (o) => o.status === 'completed',
     color: 'var(--good)',
     help: 'Finished: the customer has the food and the money is collected. Only today’s orders show here; older ones are under History. These count towards sales.',
   },
@@ -60,7 +62,7 @@ export default function Orders() {
             </button>
           ))}
         </div>
-        <span className="muted small">Every order is pay on delivery</span>
+        <span className="muted small">Customers pay on delivery or at pickup</span>
       </div>
       {tab === 'history' ? <History branchQ={scopeQ} onOpen={setOpenId} /> : <Board branchQ={scopeQ} onOpen={setOpenId} />}
       {openId && <OrderDetail id={openId} onClose={() => setOpenId(null)} />}
@@ -70,9 +72,9 @@ export default function Orders() {
 
 /* Kitchen view (switched off): big-type tickets moving accepted -> preparing -> ready.
 const KITCHEN_COLUMNS = [
-  { id: 'k-new', title: 'Accepted', statuses: ['accepted'], color: 'var(--warn)', help: 'Accepted orders waiting to be cooked.' },
-  { id: 'k-cook', title: 'Preparing', statuses: ['preparing'], color: 'var(--warn)', help: 'Being cooked now.' },
-  { id: 'k-ready', title: 'Ready', statuses: ['ready'], color: 'var(--good)', help: 'Packed and waiting for the rider or the customer.' },
+  { id: 'k-new', title: 'Accepted', match: (o) => o.status === 'accepted', color: 'var(--warn)', help: 'Accepted orders waiting to be cooked.' },
+  { id: 'k-cook', title: 'Preparing', match: (o) => o.status === 'preparing', color: 'var(--warn)', help: 'Being cooked now.' },
+  { id: 'k-ready', title: 'Ready', match: (o) => o.status === 'ready', color: 'var(--good)', help: 'Packed and waiting for the rider or the customer.' },
 ];
 */
 
@@ -153,7 +155,7 @@ function Board({ branchQ, onOpen }) {
       {COLUMNS.map((c, ci) => {
         const done = c.id === 'done';
         const list = data.orders
-          .filter((o) => c.statuses.includes(o.status))
+          .filter(c.match)
           .sort((a, b) => (done ? (b.completedAt || b.updatedAt).localeCompare(a.completedAt || a.updatedAt) : a.createdAt.localeCompare(b.createdAt)));
         const shown = done ? list.slice(0, DONE_SHOWN) : list;
         return (
@@ -408,7 +410,7 @@ function History({ branchQ, onOpen }) {
                     <td>{o.customer.name}</td>
                     <td className="small">{o.fulfilment === 'delivery' ? 'Delivery' : 'Pickup'}</td>
                     <td>
-                      <StatusBadge status={o.status} />
+                      <StatusBadge status={o.status} fulfilment={o.fulfilment} />
                     </td>
                     <td className="small">{o.paymentStatus === 'paid' ? <span className="badge paid">Paid · {o.paidWith}</span> : <span className="muted">Unpaid</span>}</td>
                     <td className="r num">{naira(o.total)}</td>
@@ -546,7 +548,7 @@ function OrderDetail({ id, onClose }) {
       {o && (
         <>
           <div className="row wrap">
-            <StatusBadge status={o.status} />
+            <StatusBadge status={o.status} fulfilment={o.fulfilment} />
             <span className="chip">{o.fulfilment === 'delivery' ? 'Delivery' : 'Pickup'}</span>
             {o.branchId && <span className="chip">{o.branchName}</span>}
             <span className="muted small">Placed {dateTime(o.createdAt)} in the app</span>
@@ -655,7 +657,7 @@ function OrderDetail({ id, onClose }) {
                 {o.statusHistory.map((h, i) => (
                   <li key={i}>
                     <span>
-                      <b>{STATUS_LABEL[h.status]}</b> <span className="muted small">{time(h.at)} · {h.by}</span>
+                      <b>{statusLabel(h.status, o.fulfilment)}</b> <span className="muted small">{time(h.at)} · {h.by}</span>
                       {h.reason && <div className="muted small">{h.reason}</div>}
                     </span>
                   </li>

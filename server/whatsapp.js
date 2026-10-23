@@ -20,8 +20,10 @@ export function orderMessage(order, branch) {
     '',
     `Order: #${order.number}`,
     ...(branch?.name && order.branchId ? [`Branch: ${branch.name}`] : []),
-    order.fulfilment === 'delivery' ? `Delivery to: ${order.customer.address}` : 'Pickup at the branch',
-    `Total: ${naira(order.total)} (pay on delivery${order.deliveryFeeExcluded ? ', delivery fee excluded' : ''})`,
+    order.fulfilment === 'delivery' ? `Delivery to: ${order.customer.address}` : `Pickup at ${order.branchName || 'the branch'} (as soon as it's ready)`,
+    order.fulfilment === 'delivery'
+      ? `Total: ${naira(order.total)} (pay on delivery${order.deliveryFeeExcluded ? ', delivery fee excluded' : ''})`
+      : `Total: ${naira(order.total)} (pay at pickup)`,
     `Name: ${order.customer.name}`,
     `Phone: ${order.customer.phone}`,
   ];

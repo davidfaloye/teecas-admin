@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { STATUS_LABEL, compactNaira } from './format.js';
+import { statusLabel, compactNaira } from './format.js';
 
 // ---------- app context ----------
 
@@ -105,7 +105,7 @@ export function Switch({ checked, onChange, label, disabled }) {
   );
 }
 
-export const StatusBadge = ({ status }) => <span className={`badge ${status}`}>{STATUS_LABEL[status] || status}</span>;
+export const StatusBadge = ({ status, fulfilment }) => <span className={`badge ${status}`}>{statusLabel(status, fulfilment)}</span>;
 
 export function ErrorBox({ error, onRetry }) {
   if (!error) return null;
