@@ -1,5 +1,7 @@
-// Customer accounts for the ordering app: sign up with a name, phone number, email and password,
-// sign in with the phone number, then see every order placed while signed in, on any phone.
+// Customer accounts for the ordering app: sign up with a name, email and password, sign in with
+// the email, then see every order placed while signed in, on any phone. Phone number and address
+// are asked for at checkout, not at sign-up. (Older accounts that were made with a phone number
+// can still sign in with it.)
 // A forgotten password is reset with a 6-digit code sent to the account's email.
 //
 // Staff sign-ins live in routes/auth.js and the `users` collection. Customers are a separate
@@ -43,8 +45,8 @@ async function assertEmailFree(e, exceptId = null) {
 }
 
 // Phone number or email, as the customer typed it.
-async function findByLogin(v) {
-  const login = str(v, { field: 'Phone number or email', required: true, max: 120 });
+async function findByLogin(v, field = 'Phone number or email') {
+  const login = str(v, { field, required: true, max: 120 });
   if (login.includes('@')) return col('customers').findOne({ email: email(login) });
   return col('customers').findOne({ phone: normalizePhone(login, { field: 'Phone number' }) });
 }
@@ -91,29 +93,25 @@ const authLimiter = rateLimit({ windowMs: 60_000, max: 10, message: 'Too many tr
 
 r.post('/signup', authLimiter, async (req, res) => {
   const name = str(req.body?.name, { field: 'Your name', required: true, min: 2, max: 80 });
-  const phone = normalizePhone(req.body?.phone, { field: 'Phone number', required: true });
   const mail = email(req.body?.email, { required: true });
   const pw = password(req.body?.password);
+  // Optional: older app versions still send these.
+  const phone = normalizePhone(req.body?.phone, { field: 'Phone number' });
   const address = str(req.body?.address, { field: 'Delivery address', max: 300 });
-  if (await col('customers').findOne({ phone })) {
+  await assertEmailFree(mail);
+  if (phone && (await col('customers').findOne({ phone }))) {
     throw new HttpError(409, 'An account already uses this phone number. Sign in instead.', 'PHONE_TAKEN');
   }
-  await assertEmailFree(mail);
+  const doc = { name, email: mail, address, passwordHash: await hashPassword(pw), lastLoginAt: new Date().toISOString() };
+  if (phone) doc.phone = phone; // left out, not '', so the unique phone index ignores it
   let customer;
   try {
-    customer = await col('customers').insertOne({
-      name,
-      phone,
-      email: mail,
-      address,
-      passwordHash: await hashPassword(pw),
-      lastLoginAt: new Date().toISOString(),
-    });
+    customer = await col('customers').insertOne(doc);
   } catch (e) {
-    // Two sign-ups for the same number or email at once: the unique indexes stop the second.
+    // Two sign-ups for the same email or number at once: the unique indexes stop the second.
     if (e?.code === 11000) {
-      if (e?.keyPattern?.email) throw new HttpError(409, 'An account already uses this email. Sign in instead.', 'EMAIL_TAKEN');
-      throw new HttpError(409, 'An account already uses this phone number. Sign in instead.', 'PHONE_TAKEN');
+      if (e?.keyPattern?.phone) throw new HttpError(409, 'An account already uses this phone number. Sign in instead.', 'PHONE_TAKEN');
+      throw new HttpError(409, 'An account already uses this email. Sign in instead.', 'EMAIL_TAKEN');
     }
     throw e;
   }
@@ -121,12 +119,12 @@ r.post('/signup', authLimiter, async (req, res) => {
   res.status(201).json({ token: signCustomerToken(customer), customer: publicCustomer(customer), claimed });
 });
 
+// login: the email (or, for older accounts, the phone number). Older app versions send `phone`.
 r.post('/signin', authLimiter, async (req, res) => {
-  const phone = normalizePhone(req.body?.phone, { field: 'Phone number', required: true });
   const pw = str(req.body?.password, { field: 'Password', required: true, max: 200 });
-  const customer = await col('customers').findOne({ phone });
+  const customer = await findByLogin(req.body?.login ?? req.body?.phone, 'Email');
   if (!customer || customer.disabled || !(await checkPassword(pw, customer.passwordHash))) {
-    throw new HttpError(401, 'That phone number and password don’t match.', 'BAD_LOGIN');
+    throw new HttpError(401, 'That email and password don’t match.', 'BAD_LOGIN');
   }
   await col('customers').updateOne({ _id: customer._id }, { $set: { lastLoginAt: new Date().toISOString() } });
   const claimed = await claimOrders(customer._id, req.body?.claim);

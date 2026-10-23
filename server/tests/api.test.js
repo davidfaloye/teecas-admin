@@ -324,10 +324,11 @@ test('customer accounts: sign up, order, see orders from the database, claim gue
   const page2 = await call('GET', `/api/public/account/orders?limit=1&before=${encodeURIComponent(page1.data.orders[0].createdAt)}`, { token });
   assert.equal(page2.data.orders[0].id, guest.data.order.id);
 
-  // Sign in from another phone.
-  assert.equal((await call('POST', '/api/public/account/signin', { body: { phone: '08051112222', password: 'nope-nope' } })).status, 401);
-  const inAgain = await call('POST', '/api/public/account/signin', { body: { phone: '0805 111 2222', password: 'amala-lover' } });
+  // Sign in from another phone, with the email (any case), or the phone number on older accounts.
+  assert.equal((await call('POST', '/api/public/account/signin', { body: { login: 'ada@example.com', password: 'nope-nope' } })).status, 401);
+  const inAgain = await call('POST', '/api/public/account/signin', { body: { login: 'ADA@example.com', password: 'amala-lover' } });
   assert.equal(inAgain.status, 200);
+  assert.equal((await call('POST', '/api/public/account/signin', { body: { phone: '0805 111 2222', password: 'amala-lover' } })).status, 200);
   assert.equal((await call('GET', '/api/public/account/orders', { token: inAgain.data.token })).data.orders.length, 2);
 
   // A customer token never opens the admin, and no token means no account data.
@@ -336,6 +337,22 @@ test('customer accounts: sign up, order, see orders from the database, claim gue
   // A staff token is not a customer.
   const owner = await login('owner@teecas.online');
   assert.equal((await call('GET', '/api/public/account/me', { token: owner })).status, 401);
+
+  // Sign-up needs only a name, email and password. Two such accounts don't clash on the phone
+  // index, and the first phone number used at checkout is kept on the account.
+  const lean = await call('POST', '/api/public/account/signup', { ip: '10.0.0.11', body: { name: 'Chidi', email: 'chidi@example.com', password: 'chidi-pass' } });
+  assert.equal(lean.status, 201);
+  assert.equal(lean.data.customer.phone, '');
+  const lean2 = await call('POST', '/api/public/account/signup', { ip: '10.0.0.11', body: { name: 'Dami', email: 'dami@example.com', password: 'dami-pass' } });
+  assert.equal(lean2.status, 201);
+  await call('POST', '/api/public/orders', {
+    token: lean.data.token,
+    ip: '10.0.0.11',
+    body: { customer: { name: 'Chidi', phone: '08070001111', address: '1 Lean Street, Benin City' }, items: [{ id: amala.id, qty: 1 }] },
+  });
+  const chidi = (await call('GET', '/api/public/account/me', { token: lean.data.token })).data.customer;
+  assert.equal(chidi.phone, '2348070001111');
+  assert.equal(chidi.address, '1 Lean Street, Benin City');
 
   // Another account can't take these orders.
   const other = await call('POST', '/api/public/account/signup', { body: { name: 'Bo', phone: '08059998888', email: 'bo@example.com', password: 'bo-password' } });

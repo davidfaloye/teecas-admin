@@ -80,7 +80,12 @@ async function ensureIndexes() {
   await mongoDb.collection('orders').createIndex({ status: 1 });
   await mongoDb.collection('orders').createIndex({ number: 1 }, { unique: true });
   await mongoDb.collection('orders').createIndex({ customerId: 1, createdAt: -1 });
-  await mongoDb.collection('customers').createIndex({ phone: 1 }, { unique: true });
+  // Phone is optional on accounts, so it is unique only where it is set. The first version of this
+  // index required it on every account; swap that one out.
+  const customers = mongoDb.collection('customers');
+  const old = (await customers.indexes()).find((i) => i.name === 'phone_1' && !i.partialFilterExpression);
+  if (old) await customers.dropIndex('phone_1');
+  await customers.createIndex({ phone: 1 }, { name: 'phone_1', unique: true, partialFilterExpression: { phone: { $type: 'string' } } });
   await mongoDb.collection('customers').createIndex({ email: 1 }, { unique: true, sparse: true });
   await mongoDb.collection('inventory').createIndex({ branchId: 1, name: 1 });
   await mongoDb.collection('stockMovements').createIndex({ inventoryId: 1, createdAt: -1 });

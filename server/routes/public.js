@@ -70,6 +70,12 @@ r.post('/orders', orderLimiter, optionalCustomer, async (req, res) => {
   if (req.customer && order.customer.address && order.customer.address !== req.customer.address) {
     await col('customers').updateOne({ _id: req.customer._id }, { $set: { address: order.customer.address } });
   }
+  // Accounts are made without a phone number; keep the first one used at checkout, unless another
+  // account already has it. Each order still carries its own phone number either way.
+  const phone = order.customer.phone;
+  if (req.customer && !req.customer.phone && phone && !(await col('customers').findOne({ phone }))) {
+    await col('customers').updateOne({ _id: req.customer._id }, { $set: { phone } }).catch(() => {});
+  }
   res.status(201).json({ order: { ...publicOrder(order), trackingToken: order.trackingToken }, whatsapp });
 });
 
