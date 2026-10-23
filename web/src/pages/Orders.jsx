@@ -80,7 +80,7 @@ export function Help({ text, end }) {
   return (
     <span className={`help ${end ? 'end' : ''}`}>
       <button type="button icon" className="help-btn" aria-label="What does this mean?">
-        <Icon name="help" />
+        <Icon name="info" />
       </button>
       <span className="help-tip" role="tooltip">
         {text}
