@@ -14,10 +14,19 @@ export default function Team() {
   const { branches, notify, user: me } = useApp();
   const { data, error, loading, reload } = useLoad(() => api('/users'), []);
   const [editing, setEditing] = useState(null);
+  const [q, setQ] = useState('');
   const bName = (id) => branches.find((b) => b._id === id)?.name || '—';
 
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox error={error} onRetry={reload} />;
+
+  // Search by name, email, role or branch, ignoring case.
+  const needle = q.trim().toLowerCase();
+  const shown = needle
+    ? data.users.filter((u) =>
+        [u.name, u.email, ROLE_LABEL[u.role], u.role === 'owner' ? 'All branches' : bName(u.branchId)].some((t) => (t || '').toLowerCase().includes(needle)),
+      )
+    : data.users;
 
   return (
     <div className="stack" style={{ gap: 18 }}>
@@ -27,39 +36,61 @@ export default function Team() {
           <Icon name="plus" /> Staff member
         </button>
       </div>
-      <div className="card flush table-wrap">
-        <table className="t">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Role</th>
-              <th>Branch</th>
-              <th>Last sign-in</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {data.users.map((u) => (
-              <tr key={u._id}>
-                <td>
-                  <b>{u.name}</b> {u._id === me._id && <span className="chip">You</span>}
-                  <div className="muted small">{u.email}</div>
-                </td>
-                <td>
-                  {ROLE_LABEL[u.role]} {u.disabled && <span className="badge cancelled">Disabled</span>}
-                </td>
-                <td>{u.role === 'owner' ? 'All branches' : bName(u.branchId)}</td>
-                <td className="small muted">{u.lastLoginAt ? dateTime(u.lastLoginAt) : 'Never'}</td>
-                <td className="r">
-                  <button className="btn sm ghost" onClick={() => setEditing(u)}>
-                    Edit
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="row wrap" style={{ gap: 10 }}>
+        <input
+          className="input"
+          type="search"
+          style={{ maxWidth: 320 }}
+          placeholder="Search staff"
+          aria-label="Search staff"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === 'Escape' && setQ('')}
+        />
+        {needle && <span className="muted small">{shown.length === 0 ? 'No one matches' : `${shown.length} of ${data.users.length} staff`}</span>}
       </div>
+      {needle && shown.length === 0 ? (
+        <div className="card empty">
+          No staff member matches “{q.trim()}”.{' '}
+          <button className="btn sm ghost" onClick={() => setQ('')}>
+            Clear search
+          </button>
+        </div>
+      ) : (
+        <div className="card flush table-wrap">
+          <table className="t">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Branch</th>
+                <th>Last sign-in</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((u) => (
+                <tr key={u._id}>
+                  <td>
+                    <b>{u.name}</b> {u._id === me._id && <span className="chip">You</span>}
+                    <div className="muted small">{u.email}</div>
+                  </td>
+                  <td>
+                    {ROLE_LABEL[u.role]} {u.disabled && <span className="badge cancelled">Disabled</span>}
+                  </td>
+                  <td>{u.role === 'owner' ? 'All branches' : bName(u.branchId)}</td>
+                  <td className="small muted">{u.lastLoginAt ? dateTime(u.lastLoginAt) : 'Never'}</td>
+                  <td className="r">
+                    <button className="btn sm ghost" onClick={() => setEditing(u)}>
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {editing && (
         <UserForm
           user={editing}
@@ -78,6 +109,9 @@ export default function Team() {
 
 function UserForm({ user, branches, onClose, onSaved }) {
   const isNew = !user._id;
+  const { user: me } = useApp();
+  // Owners can't be deleted (the restaurant always keeps one), and nobody deletes themselves.
+  const canDelete = !isNew && user.role !== 'owner' && user._id !== me._id;
   const [f, setF] = useState({ name: user.name || '', email: user.email || '', role: user.role || 'manager', branchId: user.branchId || branches[0]?._id || '', password: '', disabled: Boolean(user.disabled) });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -100,12 +134,30 @@ function UserForm({ user, branches, onClose, onSaved }) {
     }
   }
 
+  async function remove() {
+    if (!window.confirm(`Delete ${user.name}? They won’t be able to sign in again. Orders and stock records they handled keep their name.`)) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(`/users/${user._id}`, { method: 'DELETE' });
+      onSaved(`${user.name} deleted`);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
   return (
     <Modal
       title={isNew ? 'Add a staff member' : `Edit ${user.name}`}
       onClose={onClose}
       footer={
         <>
+          {canDelete && (
+            <button className="btn danger" style={{ marginRight: 'auto' }} onClick={remove} disabled={busy}>
+              Delete
+            </button>
+          )}
           <button className="btn ghost" onClick={onClose}>
             Cancel
           </button>

@@ -119,6 +119,19 @@ test('staff only see and change their own branch; kitchen only cooks; delivered 
   const list = await call('GET', '/api/orders', { token: uniben });
   assert.ok(list.data.orders.every((o) => o.branchName === 'Uniben'));
   assert.equal((await call('GET', '/api/users', { token: kitchen })).status, 403);
+
+  // Deleting staff: only the owner can, never an owner account, and the sign-in stops working.
+  const staff = await call('POST', '/api/users', { token: owner, body: { name: 'Temp Cashier', email: 'temp@teecas.online', role: 'cashier', branchId: list.data.orders[0]?.branchId || (await call('GET', '/api/branches', { token: owner })).data.branches[0]._id, password: 'temp-pass-1' } });
+  assert.equal(staff.status, 201);
+  const { signToken } = await import('../auth.js');
+  const { col } = await import('../db.js');
+  const tempToken = signToken(await col('users').findOne({ email: 'temp@teecas.online' })); // no login call: logins are rate-limited
+  assert.equal((await call('DELETE', `/api/users/${staff.data.user._id}`, { token: kitchen })).status, 403);
+  const ownerId = (await call('GET', '/api/users', { token: owner })).data.users.find((u) => u.role === 'owner')._id;
+  assert.equal((await call('DELETE', `/api/users/${ownerId}`, { token: owner })).status, 403);
+  assert.equal((await call('DELETE', `/api/users/${staff.data.user._id}`, { token: owner })).status, 200);
+  assert.equal((await call('GET', '/api/orders', { token: tempToken })).status, 401);
+  assert.equal((await call('DELETE', `/api/users/${staff.data.user._id}`, { token: owner })).status, 404);
 });
 
 test('stock movements keep the count right and never go negative', async () => {

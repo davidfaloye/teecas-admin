@@ -65,4 +65,14 @@ r.patch('/:id', async (req, res) => {
   res.json({ user: publicUser(updated) });
 });
 
+// Removes a staff member's sign-in for good. Owners can't be deleted here, so the restaurant is
+// never left without one. Past orders and stock records keep the name they were saved with.
+r.delete('/:id', async (req, res) => {
+  const user = await col('users').findOne({ _id: req.params.id });
+  if (!user) throw notFound('Staff member not found.');
+  if (user.role === 'owner') throw forbidden('Owners can’t be deleted. Change their role first if they’re leaving.');
+  await col('users').deleteOne({ _id: user._id });
+  res.json({ ok: true });
+});
+
 export default r;
