@@ -79,7 +79,7 @@ const KITCHEN_COLUMNS = [
 export function Help({ text, end }) {
   return (
     <span className={`help ${end ? 'end' : ''}`}>
-      <button type="button icon" className="help-btn" aria-label="What does this mean?">
+      <button type="button" className="help-btn" aria-label="What does this mean?">
         <Icon name="info" />
       </button>
       <span className="help-tip" role="tooltip">
