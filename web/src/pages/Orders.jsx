@@ -93,6 +93,7 @@ export function Help({ text, end }) {
 
 function Board({ branchQ, onOpen }) {
   const { notify, user } = useApp();
+  const [q, setQ] = useState('');
   const [fresh, setFresh] = useState(() => new Set());
   const [, tick] = useState(0);
   const today = todayKey();
@@ -150,12 +151,35 @@ function Board({ branchQ, onOpen }) {
   if (error && !data) return <ErrorBox error={error} onRetry={reload} />;
   const showBranch = !branchQ && user.role === 'owner';
 
+  // Search the board by customer name or order number ("2526" or "#2526").
+  const needle = q.trim().toLowerCase().replace(/^#/, '');
+  const matches = (o) => !needle || (o.customer?.name || '').toLowerCase().includes(needle) || String(o.number).includes(needle);
+  const found = needle ? data.orders.filter(matches).length : 0;
+
   return (
+    <div className="stack" style={{ gap: 12 }}>
+    <div className="row wrap" style={{ gap: 10 }}>
+      <input
+        className="input"
+        type="search"
+        style={{ maxWidth: 320 }}
+        placeholder="Search by name or order #"
+        aria-label="Search orders by customer name or order number"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => e.key === 'Escape' && setQ('')}
+      />
+      {needle && (
+        <span className="muted small">
+          {found === 0 ? 'Not on today’s board. Older orders are under History.' : `${found} ${found === 1 ? 'order' : 'orders'} found`}
+        </span>
+      )}
+    </div>
     <div className="board">
       {COLUMNS.map((c, ci) => {
         const done = c.id === 'done';
         const list = data.orders
-          .filter(c.match)
+          .filter((o) => c.match(o) && matches(o))
           .sort((a, b) => (done ? (b.completedAt || b.updatedAt).localeCompare(a.completedAt || a.updatedAt) : a.createdAt.localeCompare(b.createdAt)));
         const shown = done ? list.slice(0, DONE_SHOWN) : list;
         return (
@@ -167,7 +191,7 @@ function Board({ branchQ, onOpen }) {
               <span className="n">{list.length}</span>
             </div>
             <div className="col-body">
-              {list.length === 0 && <div className="muted small" style={{ padding: '8px 4px' }}>{done ? 'None yet today' : 'Nothing here'}</div>}
+              {list.length === 0 && <div className="muted small" style={{ padding: '8px 4px' }}>{needle ? 'No match' : done ? 'None yet today' : 'Nothing here'}</div>}
               {shown.map((o) =>
                 done ? (
                   <DoneTicket key={o._id} order={o} showBranch={showBranch} onOpen={() => onOpen(o._id)} />
@@ -180,6 +204,7 @@ function Board({ branchQ, onOpen }) {
           </section>
         );
       })}
+    </div>
     </div>
   );
 }
