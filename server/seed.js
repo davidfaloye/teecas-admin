@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { connect, disconnect, col, resetAll } from './db.js';
 import { hashPassword } from './auth.js';
 import { dayKey, addDays, startOfLocalDay, slugify } from './lib.js';
+import { MENU_PHOTOS } from './menuPhotos.js';
 
 const WHATSAPP = process.env.SEED_WHATSAPP || '2348088524502';
 
@@ -171,6 +172,7 @@ export async function seed({ withSampleOrders = true, days = 35 } = {}) {
         name,
         price,
         emoji,
+        imageUrl: MENU_PHOTOS[name] || '',
         description,
         popular: Boolean(popular),
         isAvailable: true,

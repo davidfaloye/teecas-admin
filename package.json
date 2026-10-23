@@ -12,7 +12,8 @@
     "build": "vite build --config web/vite.config.js",
     "start": "node server/index.js",
     "seed": "node server/seed.js",
-    "test": "node --test server/tests/*.test.js"
+    "test": "node --test server/tests/*.test.js",
+    "photos": "node server/addPhotos.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.1.2",
