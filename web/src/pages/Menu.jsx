@@ -8,6 +8,7 @@ export default function Menu() {
   const { data, error, loading, reload, setData } = useLoad(() => api('/menu'), []);
   const [editing, setEditing] = useState(null); // item object or {} for new
   const [catEditing, setCatEditing] = useState(null);
+  const [q, setQ] = useState('');
   const isOwner = user.role === 'owner';
   // Which branches' sold-out switches to show.
   const visibleBranches = isOwner ? (branchId === 'all' ? branches : branches.filter((b) => b._id === branchId)) : branches.filter((b) => b._id === user.branchId);
@@ -27,6 +28,12 @@ export default function Menu() {
 
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox error={error} onRetry={reload} />;
+
+  // Search matches the dish name, its description or its category, ignoring case.
+  const needle = q.trim().toLowerCase();
+  const catName = Object.fromEntries(data.categories.map((c) => [c._id, c.name]));
+  const matches = (i) => !needle || [i.name, i.description, catName[i.categoryId]].some((t) => (t || '').toLowerCase().includes(needle));
+  const found = needle ? data.items.filter(matches).length : data.items.length;
 
   return (
     <div className="stack" style={{ gap: 18 }}>
@@ -48,8 +55,36 @@ export default function Menu() {
         )}
       </div>
 
+      <div className="row wrap" style={{ gap: 10 }}>
+        <input
+          className="input"
+          type="search"
+          style={{ maxWidth: 320 }}
+          placeholder="Search dishes"
+          aria-label="Search dishes"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === 'Escape' && setQ('')}
+        />
+        {needle && (
+          <span className="muted small">
+            {found === 0 ? 'No dishes match' : `${found} ${found === 1 ? 'dish' : 'dishes'} found`}
+          </span>
+        )}
+      </div>
+
+      {needle && found === 0 && (
+        <div className="card empty">
+          Nothing on the menu matches “{q.trim()}”.{' '}
+          <button className="btn sm ghost" onClick={() => setQ('')}>
+            Clear search
+          </button>
+        </div>
+      )}
+
       {data.categories.map((c) => {
-        const items = data.items.filter((i) => i.categoryId === c._id);
+        const items = data.items.filter((i) => i.categoryId === c._id && matches(i));
+        if (needle && items.length === 0) return null; // while searching, hide categories with no match
         return (
           <section className="card flush" key={c._id}>
             <div className="cat-title spread">
