@@ -1,5 +1,5 @@
-// New-order alarm: a loud two-tone ring, like a kitchen order printer, so staff hear it across
-// a busy room. Browsers only allow sound after someone has clicked or typed on the page, so the
+// New-order alarm: a ringing bell, like a hand bell shaken at the pass, loud enough to hear across
+// a busy room. It is made in code (no sound file to load), so it works offline. Browsers only allow sound after someone has clicked or typed on the page, so the
 // audio is unlocked on the first interaction (signing in counts).
 
 let ctx = null;
@@ -22,44 +22,60 @@ if (typeof window !== 'undefined') {
   window.addEventListener('keydown', unlock);
 }
 
-// Three bursts of fast high-low tones (about 2.5 seconds), square wave for a sharp, cutting sound.
+// One strike of a small metal bell: a few inharmonic partials (the ratios of a real bell) that
+// fade at different speeds, the high ones fastest, which gives the bright "ting" and the ring.
+const PARTIALS = [
+  [1, 0.55, 1.6], // [ratio to the pitch, loudness, seconds to fade]
+  [2.76, 0.3, 0.9],
+  [5.4, 0.16, 0.45],
+  [8.93, 0.08, 0.25],
+];
+
+function strike(c, out, t, pitch, level) {
+  for (const [ratio, gain, fade] of PARTIALS) {
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(pitch * ratio, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain * level, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + fade);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + fade + 0.05);
+  }
+}
+
+// Two rings of a shaken bell (about 2.6 seconds): quick strikes, the clapper hitting one side
+// then the other, so the pitch wobbles slightly.
 export function playAlarm() {
   try {
     const c = audio();
     if (!c) return;
     const out = c.createDynamicsCompressor(); // loud without distorting
-    out.threshold.value = -10;
-    out.ratio.value = 6;
+    out.threshold.value = -14;
+    out.ratio.value = 8;
     const master = c.createGain();
-    master.gain.value = 0.9;
+    master.gain.value = 1;
     out.connect(master).connect(c.destination);
 
     const start = c.currentTime + 0.05;
-    const tone = 0.13;
-    const bursts = 3;
-    const perBurst = 6;
-    const gap = 0.28;
-    for (let b = 0; b < bursts; b++) {
-      for (let i = 0; i < perBurst; i++) {
-        const t = start + b * (perBurst * tone + gap) + i * tone;
-        const o = c.createOscillator();
-        const g = c.createGain();
-        o.type = 'square';
-        o.frequency.setValueAtTime(i % 2 ? 740 : 1180, t);
-        g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(0.5, t + 0.01);
-        g.gain.setValueAtTime(0.5, t + tone - 0.025);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + tone - 0.005);
-        o.connect(g).connect(out);
-        o.start(t);
-        o.stop(t + tone);
+    const rings = 2;
+    const strikes = 8;
+    const every = 0.13;
+    const gap = 0.3;
+    const pitch = 1040;
+    for (let r = 0; r < rings; r++) {
+      for (let i = 0; i < strikes; i++) {
+        const t = start + r * (strikes * every + gap) + i * every;
+        strike(c, out, t, i % 2 ? pitch * 1.012 : pitch, i === 0 ? 1 : 0.8);
       }
     }
-    const end = bursts * (perBurst * tone + gap);
+    const end = rings * (strikes * every + gap) + 1.8;
     setTimeout(() => {
       out.disconnect();
       master.disconnect();
-    }, (end + 0.5) * 1000);
+    }, end * 1000);
   } catch {
     /* audio unavailable */
   }

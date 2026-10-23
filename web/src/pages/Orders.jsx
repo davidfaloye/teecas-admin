@@ -265,7 +265,7 @@ function Ticket({ order: o, fresh, showBranch, onOpen, onMove, canAct, defaultBr
       </div>
       <div className="row wrap" style={{ gap: 6 }}>
         <span className="chip">{o.fulfilment === 'delivery' ? 'Delivery' : 'Pickup'}</span>
-        {!o.branchId ? <span className="chip unassigned">No branch yet</span> : showBranch && <span className="chip">{o.branchName}</span>}
+        {showBranch && o.branchId && <span className="chip">{o.branchName}</span>}
         {o.paymentStatus === 'paid' && <span className="badge paid">Paid</span>}
       </div>
       <div className="small">
@@ -404,7 +404,7 @@ function History({ branchQ, onOpen }) {
                   <tr key={o._id} className="click" onClick={() => onOpen(o._id)}>
                     <td className="num">#{o.number}</td>
                     <td className="small">{dateTime(o.createdAt)}</td>
-                    {showBranch && <td>{o.branchName || <span className="muted">No branch yet</span>}</td>}
+                    {showBranch && <td>{o.branchName || <span className="muted">—</span>}</td>}
                     <td>{o.customer.name}</td>
                     <td className="small">{o.fulfilment === 'delivery' ? 'Delivery' : 'Pickup'}</td>
                     <td>
@@ -548,7 +548,7 @@ function OrderDetail({ id, onClose }) {
           <div className="row wrap">
             <StatusBadge status={o.status} />
             <span className="chip">{o.fulfilment === 'delivery' ? 'Delivery' : 'Pickup'}</span>
-            {o.branchId ? <span className="chip">{o.branchName}</span> : <span className="chip unassigned">No branch yet</span>}
+            {o.branchId && <span className="chip">{o.branchName}</span>}
             <span className="muted small">Placed {dateTime(o.createdAt)} in the app</span>
           </div>
 

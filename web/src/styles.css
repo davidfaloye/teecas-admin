@@ -101,6 +101,17 @@ p { margin: 0; }
 .live i { width: 9px; height: 9px; border-radius: 50%; background: #a8a49b; }
 .live.on i { background: var(--good); box-shadow: 0 0 0 3px rgba(14, 122, 75, 0.18); }
 
+/* Bell in the header: count of orders waiting in Incoming; tap to open them. */
+.bell { position: relative; display: inline-grid; place-items: center; width: 40px; height: 40px; border: 1.5px solid var(--line-2); border-radius: 50%; color: var(--text); text-decoration: none; }
+.bell:hover { border-color: var(--ink); }
+.bell:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.bell svg { width: 20px; height: 20px; }
+.bell.ringing { border-color: var(--accent); color: var(--accent); }
+.bell.ringing svg { transform-origin: 50% 10%; animation: bell-swing 2.4s ease-in-out infinite; }
+.bell-count { position: absolute; top: -6px; right: -8px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 800; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; border: 2px solid var(--bg); box-sizing: content-box; }
+@keyframes bell-swing { 0%, 60%, 100% { transform: rotate(0); } 8% { transform: rotate(14deg); } 16% { transform: rotate(-12deg); } 24% { transform: rotate(9deg); } 32% { transform: rotate(-6deg); } 40% { transform: rotate(3deg); } }
+@media (prefers-reduced-motion: reduce) { .bell.ringing svg { animation: none; } }
+
 @media (max-width: 900px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
   .side { position: fixed; z-index: 50; inset: 0 auto 0 0; width: 260px; transform: translateX(-100%); transition: transform .2s ease; }

@@ -25,6 +25,7 @@ const PAGES = [
 ];
 
 const SCOPE_KEY = 'teecas_admin_branch';
+const SOUND_KEY = 'teecas_admin_sound'; // per computer: one till can be muted while another rings
 const REPEAT_MS = 30000; // repeat the alarm while orders wait in Incoming
 const readHash = () => (window.location.hash.replace(/^#\/?/, '').split('?')[0] || '');
 
@@ -44,7 +45,21 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [live, setLive] = useState(false);
   const [newCount, setNewCount] = useState(0);
-  const [sound, setSound] = useState(true);
+  const [sound, setSoundState] = useState(() => {
+    try {
+      return localStorage.getItem(SOUND_KEY) !== 'off';
+    } catch {
+      return true;
+    }
+  });
+  const setSound = useCallback((on) => {
+    setSoundState(on);
+    try {
+      localStorage.setItem(SOUND_KEY, on ? 'on' : 'off');
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const soundRef = useRef(sound);
   soundRef.current = sound;
   const lastRing = useRef(0);
@@ -127,7 +142,7 @@ export default function App() {
       refreshNewCount();
       if (type === 'order.created') {
         if (soundRef.current) ring();
-        notify(`New order #${order.number} · ${order.branchName || 'No branch yet'} · ${order.customer.name}`, 'new', () => {
+        notify(`New order #${order.number}${order.branchName ? ` · ${order.branchName}` : ''} · ${order.customer.name}`, 'new', () => {
           window.location.hash = '#/orders';
         });
       }
@@ -162,8 +177,8 @@ export default function App() {
   const current = allowed.find((p) => p.id === page) || allowed[0];
 
   const ctx = useMemo(
-    () => ({ user, setUser, branches, reloadBranches: loadBranches, branchId, setScope, notify, signOut }),
-    [user, branches, loadBranches, branchId, notify, signOut],
+    () => ({ user, setUser, branches, reloadBranches: loadBranches, branchId, setScope, notify, signOut, sound, setSound, ring }),
+    [user, branches, loadBranches, branchId, notify, signOut, sound, setSound, ring],
   );
 
   if (booting) return <Loading />;
@@ -225,19 +240,15 @@ export default function App() {
                 <i />
                 <span>{live ? 'Live' : 'Offline'}</span>
               </span>
-              <button
-                className="btn sm ghost"
-                onClick={() => {
-                  // Turning the sound on plays the alarm once so staff know what to listen for.
-                  if (!sound) ring();
-                  setSound((v) => !v);
-                }}
-                aria-pressed={sound}
-                title={sound ? 'Alarm on for new orders. Click to mute.' : 'Muted. Click to turn the new-order alarm on (plays it once).'}
+              <a
+                href="#/orders"
+                className={`bell ${newCount > 0 ? 'ringing' : ''}`}
+                aria-label={`${newCount ? `${newCount} incoming ${newCount === 1 ? 'order' : 'orders'}` : 'No incoming orders'}${sound ? '' : ', sound off'}`}
+                title={`${newCount ? `${newCount} waiting in Incoming` : 'No orders waiting'}${sound ? '' : ' · Sound is off (turn it on in My account)'}`}
               >
-                <Icon name="bell" />
-                {sound ? 'Sound on' : 'Muted'}
-              </button>
+                <Icon name={sound ? 'bell' : 'bellOff'} />
+                {newCount > 0 && <span className="bell-count">{newCount > 99 ? '99+' : newCount}</span>}
+              </a>
               {user.role === 'owner' ? (
                 <select className="input" style={{ width: 'auto' }} value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Branch">
                   <option value="all">All branches</option>
