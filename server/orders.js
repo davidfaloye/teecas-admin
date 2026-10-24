@@ -180,7 +180,10 @@ export async function changeStatus(order, nextStatus, user, reason = '', payment
   );
   if (!updated) throw bad('Someone else just updated this order. Refresh and try again.', 'CONFLICT');
   publish('order.updated', updated, updated.branchId);
-  notifyCustomer(updated); // fire and forget: tell the customer's phone
+  // Fire and forget: tell the customer's phone. A token for an uninstalled app is dropped.
+  notifyCustomer(updated).then((r) => {
+    if (r.error === 'DeviceNotRegistered') col('orders').updateOne({ _id: updated._id }, { $set: { pushToken: null } });
+  });
   if (!order.branchId && updated.branchId) publish('order.updated', updated, null); // let other branches drop it
   return updated;
 }

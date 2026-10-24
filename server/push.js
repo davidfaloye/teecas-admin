@@ -13,11 +13,11 @@ export function cleanPushToken(v) {
 }
 
 const MESSAGES = {
-  accepted: (o) => ['Order accepted', `${o.branchName || 'Teecas'} is preparing order #${o.number}.`],
+  accepted: (o) => ['Order accepted', `${o.branchName || 'Teecas Amala'} is preparing order #${o.number}.`],
   preparing: (o) => ['Being prepared', `Order #${o.number} is being prepared.`],
   ready: (o) =>
     o.fulfilment === 'pickup'
-      ? ['Ready for pickup', `Order #${o.number} is ready. Pick it up at ${o.branchName || 'Teecas'} and pay there.`]
+      ? ['Ready for pickup', `Order #${o.number} is ready. Pick it up at ${o.branchName || 'Teecas Amala'} and pay there.`]
       : ['Order ready', `Order #${o.number} is ready.`],
   out_for_delivery: (o) => ['On the way', `Order #${o.number} is on its way. Have your payment ready.`],
   completed: (o) =>
@@ -46,8 +46,23 @@ export async function notifyCustomer(order) {
         data: { orderId: order._id, token: order.trackingToken, status: order.status },
       }),
     });
-    return { sent: res.ok };
-  } catch {
-    return { sent: false };
+    // Expo answers 200 even when it rejects the message, with the reason in the ticket. Log it, or
+    // a broken setup (e.g. no FCM key on EAS: InvalidCredentials) fails silently.
+    let ticket = null;
+    try {
+      const body = await res.json();
+      ticket = Array.isArray(body?.data) ? body.data[0] : body?.data;
+    } catch {
+      /* no readable body */
+    }
+    if (!res.ok || ticket?.status === 'error') {
+      const error = ticket?.details?.error || `HTTP_${res.status}`;
+      console.warn(`[push] order #${order.number} (${order.status}) not sent: ${error}${ticket?.message ? ` — ${ticket.message}` : ''}`);
+      return { sent: false, error };
+    }
+    return { sent: true };
+  } catch (e) {
+    console.warn(`[push] order #${order?.number} not sent: ${e?.message || e}`);
+    return { sent: false, error: 'NETWORK' };
   }
 }
